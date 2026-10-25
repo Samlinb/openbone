@@ -129,16 +129,20 @@ Auto-recovery and layout data live in `%LOCALAPPDATA%/Openbone` on Windows by de
 
 ### 4. Import existing Spine JSON
 
-1. Prepare exported JSON at version `4.2.22` that fits the compatibility scope above.
+1. Prepare exported JSON at version `3.8.75` or `4.2.22` that fits the compatibility scope above.
 2. Place the same-named `.atlas` and its referenced PNGs in position; when using individual images, keep `skeleton.images` and attachment paths resolvable. Relative resource paths must stay inside the imported resource directory.
-3. Choose "File → Import 4.2.22 JSON…" and select the skeleton JSON. You may also select `current.json` from an Openbone export asset pack; the editor will parse and validate the pack.
+3. Choose "File → Import Spine JSON…" and select the skeleton JSON. You may also select `current.json` from an Openbone export asset pack; the editor will parse and validate the pack.
 4. A successful import produces a new unsaved project — save it as an Openbone project for further editing.
 
 If an import is rejected, check the version, metadata, attachment types, atlas configuration and constraint limits against the field paths in the error message. Changing only the version number does not convert data from other versions.
 
+`3.8.75` imports translate angles, relative Bezier curves, constraint mixes and deform structures. Invalid entries and unsupported fields are filtered with a path report; valid sibling attachments and timelines are retained. Missing images retain their resource links and dimensions; Linear atlas filtering is adapted to Nearest. Shear and special inheritance modes remain unsupported and are reported and filtered. `4.2.22` imports remain strict. Exporting to `3.8.75` rejects physics, proportional path spacing and incompatible independent axis curves/mixes. Packages require valid PNGs. Later official 3.8 runtimes reject the `3.8.75` version marker; use matching older tools, or export `4.2.22` for its matching runtime.
+
 ### 5. Export game assets
 
-Choose "File → Export 4.2.22 Asset Pack…" and pick an output directory. Example export result:
+Slot color playback/import/export supports 3.8 `color` and 4.2 `rgba`, `rgb`, `alpha`, setup tint, linear/stepped/Bezier interpolation and independent RGB/alpha channels. Colors multiply texture samples; alpha also affects picking. Projects containing colors use schema 7; earlier projects remain readable. Exporting independent RGB/alpha to 3.8 requires matching key times and a shared curve. All 14 color tracks in `dandao_1` roundtrip. Optional native rendering check: `mvn -Dtest=SlotColorRenderTest -Dopenbone.verifyGl=true test` generates a contact sheet and portable project in `target/` through the production renderer in a windowless Pbuffer.
+
+Choose "File → Export Spine Package…", pick an output directory, then select `4.2.22` or `3.8.75`. Example export result:
 
 ```text
 export/

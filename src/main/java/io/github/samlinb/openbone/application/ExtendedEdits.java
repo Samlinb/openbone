@@ -106,7 +106,7 @@ public final class ExtendedEdits {
             var key = keys.stream().filter(k -> k.slotId().equals(slot) && k.time() == time).findFirst().orElse(null);
             keys.removeIf(k -> k.slotId().equals(slot) && k.time() == time);
             keys.add(new DiscreteTracks.AttachmentKey(key == null ? EntityId.create() : key.id(), time, slot, name));
-            return discrete(a, new DiscreteTracks(keys, old.drawOrder(), old.events()));
+            return discrete(a, new DiscreteTracks(keys, old.drawOrder(), old.events(),old.colors()));
         });
     }
 
@@ -117,7 +117,7 @@ public final class ExtendedEdits {
             var key = keys.stream().filter(k -> k.time() == time).findFirst().orElse(null);
             keys.removeIf(k -> k.time() == time);
             keys.add(new DiscreteTracks.OrderKey(key == null ? EntityId.create() : key.id(), time, slots));
-            return discrete(a, new DiscreteTracks(old.attachments(), keys, old.events()));
+            return discrete(a, new DiscreteTracks(old.attachments(), keys, old.events(),old.colors()));
         });
     }
 
@@ -135,7 +135,7 @@ public final class ExtendedEdits {
             var keys = new ArrayList<>(old.events());
             keys.removeIf(k -> k.id().equals(e.id()));
             keys.add(e);
-            return discrete(a, new DiscreteTracks(old.attachments(), old.drawOrder(), keys));
+            return discrete(a, new DiscreteTracks(old.attachments(), old.drawOrder(), keys,old.colors()));
         });
     }
 
@@ -145,7 +145,10 @@ public final class ExtendedEdits {
             return discrete(a,
                     new DiscreteTracks(old.attachments().stream().filter(k -> !k.id().equals(id)).toList(),
                             old.drawOrder().stream().filter(k -> !k.id().equals(id)).toList(),
-                            old.events().stream().filter(k -> !k.id().equals(id)).toList()));
+                            old.events().stream().filter(k -> !k.id().equals(id)).toList(),
+                            old.colors().stream().filter(t -> t.keys().stream().anyMatch(k -> !k.id().equals(id)))
+                                    .map(t -> new io.github.samlinb.openbone.core.animation.SlotColorTimeline(t.slotId(),t.channel(),
+                                            t.keys().stream().filter(k -> !k.id().equals(id)).toList())).toList()));
         });
     }
 

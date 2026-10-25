@@ -8,7 +8,8 @@ import io.github.samlinb.openbone.core.animation.*;
 import static io.github.samlinb.openbone.io.ProjectCodec.*;
 
 /**
- * Schema6 only. Every nested field is checked before constructing editable state.
+ * Schema6 resources and discrete tracks, plus Schema7 slot color timelines.
+ * Every nested field is checked before constructing editable state.
  */
 final class P8ProjectJson {
     private P8ProjectJson() {
@@ -106,12 +107,20 @@ final class P8ProjectJson {
             e.addObject().put("id", k.id().value()).put("time", k.time()).put("eventId", k.eventId().value())
                     .put("int", k.intValue()).put("float", k.floatValue()).put("string", k.stringValue())
                     .put("volume", k.volume()).put("balance", k.balance());
+        if(!tracks.colors().isEmpty()) {
+            var colors=n.putArray("colors");
+            for(var t:tracks.colors()) {
+                var row=colors.addObject().put("slotId",t.slotId().value()).put("channel",t.channel().name());
+                ProjectCodec.putKeys(row.putArray("keys"),t.keys());
+            }
+        }
     }
 
     static DiscreteTracks readTracks(JsonNode node) throws ProjectFormatException {
         var n = node.get("discrete");
         String p = "animation.discrete";
-        fields(n, p, "attachments", "drawOrder", "events");
+        if(n.has("colors")) fields(n, p, "attachments", "drawOrder", "events", "colors");
+        else fields(n, p, "attachments", "drawOrder", "events");
         var a = new ArrayList<DiscreteTracks.AttachmentKey>();
         var o = new ArrayList<DiscreteTracks.OrderKey>();
         var e = new ArrayList<DiscreteTracks.EventKey>();
@@ -136,7 +145,18 @@ final class P8ProjectJson {
                     integer(k.get("int"), p), number(k, "float", p), text(k, "string", p), number(k, "volume", p),
                     number(k, "balance", p)));
         }
-        return new DiscreteTracks(a, o, e);
+        var colors=new ArrayList<SlotColorTimeline>();
+        if(n.has("colors")) for(var t:array(n,"colors",p)) {
+            fields(t,p+".colors","slotId","channel","keys");
+            colors.add(new SlotColorTimeline(id(t,"slotId",p),SlotColorTimeline.Channel.valueOf(text(t,"channel",p)),ProjectCodec.readKeys(t,p)));
+        }
+        return new DiscreteTracks(a, o, e, colors);
+    }
+
+    static Rgba readColor(JsonNode n,String p) throws ProjectFormatException {
+        var v=numbers(n,"color",p);
+        if(v.size()!=4) throw bad(p+".color","Expected four color components");
+        return new Rgba(v.get(0),v.get(1),v.get(2),v.get(3));
     }
 
     private static EntityId id(JsonNode n, String key, String p) throws ProjectFormatException {

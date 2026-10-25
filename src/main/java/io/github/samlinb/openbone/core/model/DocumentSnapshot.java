@@ -175,6 +175,8 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             for (var k : clip.discrete().events())
                 if (!eventIds.contains(k.eventId()))
                     throw new IllegalArgumentException(m("documentsnapshot.0014"));
+            for (var t : clip.discrete().colors()) if (!slotIds.contains(t.slotId()))
+                throw new IllegalArgumentException("Unknown color timeline slot");
         }
         Set<String> constraintNames = new HashSet<>();
         Set<Integer> orders = new HashSet<>();
@@ -638,12 +640,19 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
         var current = skins.stream().filter(s -> s.name().equals(resources.activeSkin())).findFirst().orElseThrow();
         var fallback = skins.stream().filter(s -> s.name().equals("default")).findFirst().orElseThrow();
         Map<EntityId, Slot> byId = new HashMap<>();
+        Map<EntityId, Rgba> colors = new HashMap<>();
+        for (var s : slots) colors.put(s.id(), s.color());
+        if (clip != null) {
+            var animation = animation(clip);
+            double phase = AnimationSampler.sampleTime(time, animation.duration(), loop);
+            for (var t : animation.discrete().colors()) colors.put(t.slotId(), t.sample(colors.get(t.slotId()), phase));
+        }
         for (var s : slots) {
             String name = names.get(s.id());
             EntityId id = name == null ? null : current.find(s.id(), name);
             if (id == null && name != null)
                 id = fallback.find(s.id(), name);
-            byId.put(s.id(), s.withActiveAttachment(id));
+            byId.put(s.id(), s.withActiveAttachment(id).withColor(colors.get(s.id())));
         }
         return order.stream().map(byId::get).toList();
     }

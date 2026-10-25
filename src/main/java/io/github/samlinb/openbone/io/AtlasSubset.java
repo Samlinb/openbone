@@ -20,6 +20,10 @@ final class AtlasSubset {
     }
 
     static Map<String, Region> read(Path json) throws IOException {
+        return read(json, false, new ArrayList<>());
+    }
+
+    static Map<String, Region> read(Path json, boolean legacy, List<String> warnings) throws IOException {
         String filename = json.getFileName().toString();
         int dot = filename.lastIndexOf('.');
         Path atlas = json.resolveSibling((dot < 0 ? filename : filename.substring(0, dot)) + ".atlas");
@@ -32,13 +36,19 @@ final class AtlasSubset {
         // empty map. Whitespace-only and malformed nonempty atlases stay strict.
         if (atlasText.isEmpty())
             return Map.of();
+        if (legacy) {
+            String adjusted = atlasText.replaceAll("(?m)^(\\s*filter:\\s*)Linear\\s*,\\s*Linear\\s*$", "$1Nearest,Nearest");
+            if (!adjusted.equals(atlasText)) warnings.add("atlas.filter: Linear filtering imported as Nearest");
+            atlasText = adjusted;
+        }
         validateSyntax(atlasText, atlas.getFileName().toString());
+        final String validatedText = atlasText;
         try {
             // Parse the exact validated text, not a second disk read that may have changed.
             var validated = new FileHandle(atlas.toFile()) {
                 @Override
                 public BufferedReader reader(int bufferSize) {
-                    return new BufferedReader(new StringReader(atlasText), bufferSize);
+                    return new BufferedReader(new StringReader(validatedText), bufferSize);
                 }
             };
             var data = new TextureAtlasData(validated, new FileHandle(atlas.getParent().toFile()), false);
@@ -53,7 +63,12 @@ final class AtlasSubset {
                         || page.uWrap != TextureWrap.ClampToEdge || page.vWrap != TextureWrap.ClampToEdge)
                     throw new IOException(
                             "Unsupported atlas format/PMA/filter/repeat; requires RGBA8888, straight alpha, Nearest, no repeat");
-                var pixels = io.github.samlinb.openbone.viewport.ImageAssets.decodePng(RuntimePng.read(path));
+                if (legacy && !Files.exists(path)) {
+                    warnings.add("atlas: missing page; region metadata retained: " + path);
+                    continue;
+                }
+                var pixels = io.github.samlinb.openbone.viewport.ImageAssets.decodePng(
+                        legacy ? RuntimePng.readCompatible(path) : RuntimePng.read(path));
                 if (page.width != pixels.getWidth() || page.height != pixels.getHeight())
                     throw new IOException("Atlas page dimensions mismatch");
             }

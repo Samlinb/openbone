@@ -6,10 +6,14 @@ import io.github.samlinb.openbone.core.math.Finite;
 import static io.github.samlinb.openbone.i18n.M.m;
 
 /**
- * Explicit nullable attachment values; absence of a key is distinct from a null
- * value.
+ * Slot tracks: discrete attachments, draw order and events, plus continuous color
+ * timelines. Absence of an attachment key is distinct from a null value.
  */
-public record DiscreteTracks(List<AttachmentKey> attachments, List<OrderKey> drawOrder, List<EventKey> events) {
+public record DiscreteTracks(List<AttachmentKey> attachments, List<OrderKey> drawOrder, List<EventKey> events,
+        List<SlotColorTimeline> colors) {
+    public DiscreteTracks(List<AttachmentKey> attachments, List<OrderKey> drawOrder, List<EventKey> events) {
+        this(attachments, drawOrder, events, List.of());
+    }
     public static final DiscreteTracks EMPTY = new DiscreteTracks(List.of(), List.of(), List.of());
 
     public interface Timed {
@@ -57,6 +61,14 @@ public record DiscreteTracks(List<AttachmentKey> attachments, List<OrderKey> dra
         attachments = sorted(attachments);
         drawOrder = sorted(drawOrder);
         events = sorted(events);
+        colors = List.copyOf(colors);
+        var components = new HashSet<String>();
+        for (var t : colors) {
+            int start = t.channel() == SlotColorTimeline.Channel.ALPHA ? 3 : 0;
+            int end = t.channel() == SlotColorTimeline.Channel.RGB ? 3 : 4;
+            for (int c = start; c < end; c++) if (!components.add(t.slotId() + ":" + c))
+                throw new IllegalArgumentException("Overlapping slot color timelines");
+        }
         // Record constructors canonicalize -0.0 to +0.0 before sorting or typed time
         // lookup.
         var attachmentTimes = new HashMap<EntityId, Set<Double>>();
@@ -71,6 +83,8 @@ public record DiscreteTracks(List<AttachmentKey> attachments, List<OrderKey> dra
         for (var k : all(attachments, drawOrder, events))
             if (!ids.add(k.id()))
                 throw new IllegalArgumentException(m("discretetracks.0006"));
+        for (var t : colors) for (var k : t.keys()) if (!ids.add(k.id()))
+            throw new IllegalArgumentException("Duplicate color key ID");
     }
 
     private static <T extends Timed> List<T> sorted(List<T> values) {
@@ -86,7 +100,9 @@ public record DiscreteTracks(List<AttachmentKey> attachments, List<OrderKey> dra
     }
 
     public List<Timed> keys() {
-        return all(attachments, drawOrder, events);
+        var keys = new ArrayList<>(all(attachments, drawOrder, events));
+        colors.forEach(t -> keys.addAll(t.keys()));
+        return List.copyOf(keys);
     }
 
     public double duration() {
@@ -99,7 +115,7 @@ public record DiscreteTracks(List<AttachmentKey> attachments, List<OrderKey> dra
                         k -> !removed.contains(k.slotId())).toList(),
                 drawOrder.stream().map(k -> new OrderKey(k.id(), k.time(),
                         k.slots().stream().filter(id -> !removed.contains(id)).toList())).toList(),
-                events);
+                events, colors.stream().filter(t -> !removed.contains(t.slotId())).toList());
     }
 
     public DiscreteTracks duplicate() {
@@ -108,6 +124,7 @@ public record DiscreteTracks(List<AttachmentKey> attachments, List<OrderKey> dra
                         .toList(),
                 drawOrder.stream().map(k -> new OrderKey(EntityId.create(), k.time(), k.slots())).toList(),
                 events.stream().map(k -> new EventKey(EntityId.create(), k.time(), k.eventId(), k.intValue(),
-                        k.floatValue(), k.stringValue(), k.volume(), k.balance())).toList());
+                        k.floatValue(), k.stringValue(), k.volume(), k.balance())).toList(),
+                colors.stream().map(SlotColorTimeline::duplicate).toList());
     }
 }

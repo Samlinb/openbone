@@ -38,11 +38,11 @@ public final class ProjectCodec {
                 throw bad("$.schemaVersion", "Missing required field");
             JsonNode version = root.get("schemaVersion");
             if (!version.isIntegralNumber() || !version.canConvertToInt() || version.intValue() < 1
-                    || version.intValue() > 6)
+                    || version.intValue() > 7)
                 throw bad("$.schemaVersion", "Unsupported schema version: " + version);
             if (version.intValue() == 1)
                 fields(root, "$", "schemaVersion", "bones", "slots", "attachments");
-            else if (version.intValue() == 6)
+            else if (version.intValue() >= 6)
                 fields(root, "$", "schemaVersion", "bones", "slots", "attachments", "animations", "constraints",
                         "resources");
             else if (version.intValue() >= 4)
@@ -62,13 +62,16 @@ public final class ProjectCodec {
             index = 0;
             for (JsonNode n : array(root, "slots", "$")) {
                 String p = "$.slots[" + index++ + "]";
-                if (version.intValue() == 6)
+                if (version.intValue() >= 7)
+                    fields(n, p, "id", "name", "boneId", "activeAttachmentId", "blend", "color");
+                else if (version.intValue() >= 6)
                     fields(n, p, "id", "name", "boneId", "activeAttachmentId", "blend");
                 else
                     fields(n, p, "id", "name", "boneId", "activeAttachmentId");
                 slots.add(new Slot(id(n, "id", p), text(n, "name", p), id(n, "boneId", p),
                         nullableId(n, "activeAttachmentId", p),
-                        version.intValue() == 6 ? Slot.Blend.valueOf(text(n, "blend", p)) : Slot.Blend.NORMAL));
+                        version.intValue() >= 6 ? Slot.Blend.valueOf(text(n, "blend", p)) : Slot.Blend.NORMAL,
+                        version.intValue() >= 7 ? P8ProjectJson.readColor(n,p) : Rgba.WHITE));
             }
             index = 0;
             for (JsonNode n : array(root, "attachments", "$")) {
@@ -124,7 +127,7 @@ public final class ProjectCodec {
             index = 0;
             for (var a : array(root, "animations", "$")) {
                 String p = "$.animations[" + index++ + "]";
-                if (version.intValue() == 6)
+                if (version.intValue() >= 6)
                     fields(a, p, "id", "name", "timelines", "deforms", "constraintTracks", "discrete");
                 else if (version.intValue() >= 5)
                     fields(a, p, "id", "name", "timelines", "deforms", "constraintTracks");
@@ -190,8 +193,9 @@ public final class ProjectCodec {
                                 ConstraintChannel.valueOf(text(t, "channel", p)),
                                 readKeys(t, p + ".constraintTracks")));
                     }
+                if(version.intValue()<7 && a.path("discrete").has("colors")) throw bad(p+".discrete.colors","Color timelines require schema 7");
                 animations.add(new AnimationClip(id(a, "id", p), text(a, "name", p), tracks, deforms, constraintTracks,
-                        version.intValue() == 6 ? P8ProjectJson.readTracks(a) : DiscreteTracks.EMPTY));
+                        version.intValue() >= 6 ? P8ProjectJson.readTracks(a) : DiscreteTracks.EMPTY));
             }
             List<Constraint> constraints = new ArrayList<>();
             index = 0;
@@ -256,13 +260,13 @@ public final class ProjectCodec {
                             bool(n, "compress", p), bool(n, "stretch", p), bool(n, "uniform", p)));
                 }
             return new DocumentSnapshot(bones, slots, attachments, animations, constraints,
-                    version.intValue() == 6 ? P8ProjectJson.readResources(root) : Resources.EMPTY);
+                    version.intValue() >= 6 ? P8ProjectJson.readResources(root) : Resources.EMPTY);
         } catch (IllegalArgumentException | NullPointerException invalid) {
             throw new ProjectFormatException("Invalid project model: " + invalid.getMessage(), invalid);
         }
     }
 
-    private List<Keyframe> readKeys(JsonNode track, String p) throws ProjectFormatException {
+    static List<Keyframe> readKeys(JsonNode track, String p) throws ProjectFormatException {
         List<Keyframe> keys = new ArrayList<>();
         int index = 0;
         for (var k : array(track, "keys", p)) {
@@ -279,7 +283,7 @@ public final class ProjectCodec {
         return keys;
     }
 
-    private void putKeys(ArrayNode array, List<Keyframe> keys) {
+    static void putKeys(ArrayNode array, List<Keyframe> keys) {
         for (var k : keys) {
             var n = array.addObject().put("id", k.id().value()).put("time", k.time());
             k.values().forEach(n.putArray("values")::add);
@@ -293,7 +297,8 @@ public final class ProjectCodec {
     public byte[] encode(DocumentSnapshot model) throws IOException {
         Objects.requireNonNull(model, "model");
         ObjectNode root = mapper.createObjectNode();
-        root.put("schemaVersion", P8ProjectJson.needed(model) ? 6
+        root.put("schemaVersion", model.slots().stream().anyMatch(s -> !s.color().equals(Rgba.WHITE))
+                || model.animations().stream().anyMatch(a -> !a.discrete().colors().isEmpty()) ? 7 : P8ProjectJson.needed(model) ? 6
                 : model.animations().stream().anyMatch(a -> !a.constraintTracks().isEmpty()) ? 5
                         : !model.constraints().isEmpty()
                                 || model.attachments().stream().anyMatch(a -> a instanceof PathAttachment)
@@ -301,7 +306,7 @@ public final class ProjectCodec {
                                         : model.attachments().stream().anyMatch(a -> !(a instanceof RegionAttachment))
                                                 ? 3
                                                 : SCHEMA_VERSION);
-        if (root.path("schemaVersion").asInt() == 6)
+        if (root.path("schemaVersion").asInt() >= 6)
             P8ProjectJson.writeResources(root, model);
         ArrayNode bones = root.putArray("bones"), slots = root.putArray("slots"),
                 attachments = root.putArray("attachments");
@@ -319,8 +324,9 @@ public final class ProjectCodec {
             n.put("name", s.name());
             n.put("boneId", s.boneId().value());
             putId(n, "activeAttachmentId", s.activeAttachmentId());
-            if (root.path("schemaVersion").asInt() == 6)
+            if (root.path("schemaVersion").asInt() >= 6)
                 n.put("blend", s.blend().name());
+            if (root.path("schemaVersion").asInt() >= 7) s.color().values().forEach(n.putArray("color")::add);
         }
         for (Attachment a : model.attachments()) {
             if (a instanceof PathAttachment path) {
@@ -377,7 +383,7 @@ public final class ProjectCodec {
             var n = animations.addObject();
             n.put("id", a.id().value());
             n.put("name", a.name());
-            if (root.path("schemaVersion").asInt() == 6)
+            if (root.path("schemaVersion").asInt() >= 6)
                 P8ProjectJson.writeTracks(n, a.discrete());
             var timelines = n.putArray("timelines");
             for (var t : a.timelines()) {

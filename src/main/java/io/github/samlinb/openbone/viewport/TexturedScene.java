@@ -26,6 +26,8 @@ public final class TexturedScene {
                 batch.setBlendFunctionSeparate(GL20.GL_SRC_ALPHA, destination, GL20.GL_ONE, destination);
                 var image = texture.apply(draw.source());
                 var geometry = draw.geometry();
+                var color=draw.color();
+                float packedColor=Color.toFloatBits((float)color.r(),(float)color.g(),(float)color.b(),(float)color.a());
                 for (int start = 0; start < geometry.triangles().size(); start += 1800) {
                     int count = Math.min(1800, geometry.triangles().size() - start);
                     float[] data = new float[count * 5];
@@ -36,7 +38,7 @@ public final class TexturedScene {
                         int k = i * 5;
                         data[k] = bounded(p.x());
                         data[k + 1] = bounded(p.y());
-                        data[k + 2] = Color.WHITE_FLOAT_BITS;
+                        data[k + 2] = packedColor;
                         data[k + 3] = (float) geometry.uvs().get(vertex).x();
                         data[k + 4] = (float) geometry.uvs().get(vertex).y();
                         indices[i] = (short) i;

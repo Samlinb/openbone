@@ -1,5 +1,7 @@
 package io.github.samlinb.openbone.desktop;
 
+import java.io.IOException;
+
 import java.awt.*;
 import java.awt.event.*;
 import java.nio.file.*;
@@ -962,7 +964,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             propertyButton(m("editorframe.0052"), this::createPhysicsConstraint);
         } else if (s != null) {
             field("name", m("editorframe.0096"), s.name(), value -> edit(m("editorframe.0102"), d -> ModelEdits
-                    .editSlot(d, id, v -> new Slot(v.id(), value, v.boneId(), v.activeAttachmentId(), v.blend()))));
+                    .editSlot(d, id, v -> new Slot(v.id(), value, v.boneId(), v.activeAttachmentId(), v.blend(),v.color()))));
             JComboBox<Choice> bones = boneChoices(false, s.boneId());
             bones.setName("property.binding");
             named.put(bones.getName(), bones);
@@ -972,7 +974,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                     return;
                 var target = ((Choice) bones.getSelectedItem()).id();
                 guard(() -> edit(m("editorframe.0104"), d -> ModelEdits.editSlot(d, id,
-                        v -> new Slot(v.id(), v.name(), target, v.activeAttachmentId(), v.blend()))));
+                        v -> new Slot(v.id(), v.name(), target, v.activeAttachmentId(), v.blend(),v.color()))));
             });
             JComboBox<Choice> active = new JComboBox<>();
             active.addItem(new Choice(null, m("editorframe.0105")));
@@ -2464,6 +2466,12 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             viewport.camera().reset();
             changed();
             message(m("editorframe.0335"));
+            offerAtlasSplit(source);
+            if (!next.importWarnings().isEmpty()) {
+                var report = new JTextArea(String.join("\n", next.importWarnings()), 18, 90);
+                report.setEditable(false);
+                JOptionPane.showMessageDialog(this, new JScrollPane(report), m("editorframe.spineImportReport"), JOptionPane.WARNING_MESSAGE);
+            }
         });
     }
 
@@ -2476,15 +2484,33 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         if (c.showSaveDialog(this) != JFileChooser.APPROVE_OPTION)
             return;
         Path directory = c.getSelectedFile().toPath().toAbsolutePath().normalize();
+        String version = (String)JOptionPane.showInputDialog(this, m("editorframe.spineVersion"), m("editorframe.0340"),
+                JOptionPane.QUESTION_MESSAGE, null,
+                new String[] { SkeletonJsonCodec.VERSION, SkeletonJsonCodec.VERSION_38 }, SkeletonJsonCodec.VERSION);
+        if (version == null) return;
         guard(() -> {
             Path exported = new ExportPackage().publish(directory, model(),
-                    document.path().map(Path::getParent).orElse(Path.of("").toAbsolutePath()));
+                    document.path().map(Path::getParent).orElse(Path.of("").toAbsolutePath()), version);
             message(m("editorframe.0337") + exported);
             JOptionPane.showMessageDialog(this,
                     m("editorframe.0338") + exported + "\nAtlas：" + exported.resolveSibling("skeleton.atlas")
                             + m("editorframe.0339") + directory.resolve("current.json"),
                     m("editorframe.0340"), JOptionPane.INFORMATION_MESSAGE);
         });
+    }
+
+    private void offerAtlasSplit(Path source) throws IOException {
+        if (!AtlasSplitter.available(source,model())) return;
+        int answer=JOptionPane.showConfirmDialog(this,m("editorframe.splitAtlasPrompt"),m("editorframe.splitAtlasTitle"),
+                JOptionPane.YES_NO_OPTION,JOptionPane.QUESTION_MESSAGE);
+        if(answer!=JOptionPane.YES_OPTION) return;
+        var split=AtlasSplitter.split(source,model());
+        document.history().execute(m("editorframe.splitAtlasTitle"),Commands.model(d->split.document()));
+        resetAssets();
+        changed();
+        message(m("editorframe.splitAtlasDone")+split.directory());
+        JOptionPane.showMessageDialog(this,m("editorframe.splitAtlasDone")+split.directory()+"\n"+split.images()+m("editorframe.splitAtlasCount"),
+                m("editorframe.splitAtlasTitle"),JOptionPane.INFORMATION_MESSAGE);
     }
 
     private void resetAssets() {

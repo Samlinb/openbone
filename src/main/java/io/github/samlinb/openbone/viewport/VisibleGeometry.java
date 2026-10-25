@@ -15,7 +15,10 @@ public final class VisibleGeometry {
     }
 
     public record Draw(EntityId attachmentId, EntityId slotId, String source, PolygonClipper.Geometry geometry,
-            Slot.Blend blend) {
+            Slot.Blend blend, Rgba color) {
+        public Draw(EntityId attachmentId, EntityId slotId, String source, PolygonClipper.Geometry geometry, Slot.Blend blend) {
+            this(attachmentId,slotId,source,geometry,blend,Rgba.WHITE);
+        }
     }
 
     public static List<Draw> evaluate(DocumentSnapshot d, WorldPose pose) {
@@ -54,7 +57,7 @@ public final class VisibleGeometry {
                 }
                 if (clip != null)
                     geometry = PolygonClipper.clip(geometry, polygon.vertices(), polygon.triangles());
-                result.add(new Draw(a.id(), slot.id(), a.source(), geometry, slot.blend()));
+                result.add(new Draw(a.id(), slot.id(), a.source(), geometry, slot.blend(),slot.color()));
             }
             if (clip != null && slot.id().equals(clip.endSlotId())) {
                 clip = null;

@@ -6,7 +6,7 @@ import java.util.*;
 import com.fasterxml.jackson.databind.JsonNode;
 
 /**
- * Read-only inspection of original 4.2.22 exports, NOT a lossy editable-project
+ * Read-only inspection of 3.8.75 and 4.2.22 exports, NOT an editable-project
  * importer.
  * Mesh/animation/etc. remain in the source file and are explicitly reported as
  * future capabilities.
@@ -34,7 +34,7 @@ public final class SkeletonExportReader {
         if (!root.isObject() || !root.path("skeleton").isObject())
             throw ProjectCodec.bad("$.skeleton", "Expected metadata object");
         String version = ProjectCodec.text(root.get("skeleton"), "spine", "$.skeleton");
-        if (!version.equals("4.2.22"))
+        if (!Set.of(SkeletonJsonCodec.VERSION, SkeletonJsonCodec.VERSION_38).contains(version))
             throw ProjectCodec.bad("$.skeleton.spine", "Unsupported export version: " + version);
         List<String> bones = new ArrayList<>(), slots = new ArrayList<>(), animations = new ArrayList<>(),
                 unsupported = new ArrayList<>();

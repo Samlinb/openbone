@@ -42,6 +42,14 @@ public final class ExportPackage {
     }
 
     public Path publish(Path directory, DocumentSnapshot d, Path imageBase) throws IOException {
+        return publish(directory, d, imageBase, SkeletonJsonCodec.VERSION, false);
+    }
+
+    public Path publish(Path directory, DocumentSnapshot d, Path imageBase, String version) throws IOException {
+        return publish(directory, d, imageBase, version, true);
+    }
+
+    private Path publish(Path directory, DocumentSnapshot d, Path imageBase, String version, boolean compatibleImages) throws IOException {
         RuntimeRange.validate(d);
         Map<EntityId, String> plannedPaths = new LinkedHashMap<>();
         Map<EntityId, byte[]> plannedImages = new LinkedHashMap<>();
@@ -49,7 +57,8 @@ public final class ExportPackage {
         for (var a : d.attachments())
             if (a.source() != null) {
                 plannedPaths.put(a.id(), "region_" + plannedIndex++);
-                byte[] bytes = RuntimePng.read(ResourcePaths.resolve(imageBase, a.source()));
+                Path source = ResourcePaths.resolve(imageBase, a.source());
+                byte[] bytes = compatibleImages ? RuntimePng.readCompatible(source) : RuntimePng.read(source);
                 var pixels = io.github.samlinb.openbone.viewport.ImageAssets.decodePng(bytes);
                 var region = d.resources().atlas().get(a.id());
                 if (region != null
@@ -57,7 +66,7 @@ public final class ExportPackage {
                     throw new IOException("Atlas page dimensions changed: " + a.name());
                 plannedImages.put(a.id(), bytes);
             }
-        byte[] plannedSkeleton = new SkeletonJsonCodec().encode(d, plannedPaths, "images/");
+        byte[] plannedSkeleton = new SkeletonJsonCodec().encode(d, plannedPaths, "images/", version);
         Path root = directory.toAbsolutePath().normalize();
         if (Files.isSymbolicLink(root))
             throw new IOException("Export directory may not be a symlink");
@@ -117,7 +126,7 @@ public final class ExportPackage {
         hashes.put("skeleton.atlas", ResourcePaths.sha(atlasBytes));
         checkpoint.at(Stage.AFTER_ATLAS, stage);
         byte[] manifest = JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(
-                Map.of("format", "openbone-export-generation-1", "spine", "4.2.22", "files", hashes));
+                Map.of("format", "openbone-export-generation-1", "spine", version, "files", hashes));
         write(stage.resolve("manifest.json"), manifest);
         checkpoint.at(Stage.AFTER_MANIFEST, stage);
         Path published = root.resolve(generation);
@@ -164,7 +173,7 @@ public final class ExportPackage {
         var m = new ProjectCodec().parseTree(manifest);
         ProjectCodec.fields(m, "$", "format", "spine", "files");
         if (!m.path("format").asText().equals("openbone-export-generation-1")
-                || !m.path("spine").asText().equals("4.2.22") || !m.path("files").isObject())
+                || !Set.of(SkeletonJsonCodec.VERSION, SkeletonJsonCodec.VERSION_38).contains(m.path("spine").asText()) || !m.path("files").isObject())
             throw new IOException("Invalid generation manifest");
         if (!m.get("files").has("skeleton.json") || !m.get("files").has("skeleton.atlas"))
             throw new IOException("Incomplete generation manifest");

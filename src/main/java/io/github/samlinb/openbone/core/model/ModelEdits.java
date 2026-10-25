@@ -51,7 +51,7 @@ public final class ModelEdits {
             }).toList();
             return new io.github.samlinb.openbone.core.animation.AnimationClip(a.id(), a.name(), a.timelines(),
                     a.deforms(), a.constraintTracks(), new io.github.samlinb.openbone.core.animation.DiscreteTracks(
-                            tracks.attachments(), order, tracks.events()));
+                            tracks.attachments(), order, tracks.events(),tracks.colors()));
         }).toList();
         return new DocumentSnapshot(d.bones(), slots, d.attachments(), animations, d.constraints(), d.resources());
     }
@@ -153,7 +153,7 @@ public final class ModelEdits {
                         ? new io.github.samlinb.openbone.core.animation.DiscreteTracks.AttachmentKey(k.id(), k.time(),
                                 k.slotId(), null)
                         : k)
-                .toList(), tracks.drawOrder(), tracks.events());
+                .toList(), tracks.drawOrder(), tracks.events(),tracks.colors());
     }
 
     /**

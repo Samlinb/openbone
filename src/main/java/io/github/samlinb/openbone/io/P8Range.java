@@ -30,6 +30,18 @@ final class P8Range {
                             throw ProjectCodec.bad("P8.path",
                                     "Switching path constraint target attachments requires a new solver envelope");
         for (var clip : d.animations()) {
+            for(var t:clip.discrete().colors()) {
+                float previous=-1;
+                for(var k:t.keys()) {
+                    float current=time(k.time());
+                    if(current<=previous) throw ProjectCodec.bad("color.time","Distinct seconds collapse in float32");
+                    previous=current;
+                    for(var c:k.curves()) {
+                        RuntimeRange.number(c.x1(),"color curve.x1"); RuntimeRange.number(c.x2(),"color curve.x2");
+                        RuntimeRange.number(c.y1(),"color curve.y1"); RuntimeRange.number(c.y2(),"color curve.y2");
+                    }
+                }
+            }
             Map<EntityId, Float> times = new HashMap<>();
             float order = -1, event = -1;
             double previousEvent = -1;

@@ -16,6 +16,7 @@ public final class Picker {
         var draws = VisibleGeometry.evaluate(d, pose);
         for (int i = draws.size() - 1; i >= 0; i--) {
             var draw = draws.get(i);
+            if(draw.color().a()==0) continue;
             var attachment = d.attachment(draw.attachmentId());
             // Preserve the legacy region half-open right/bottom policy. Geometry and
             // page UV still come from exactly the same trimmed triangles as GL.
@@ -43,7 +44,7 @@ public final class Picker {
                 int a = g.triangles().get(t), b = g.triangles().get(t + 1), c = g.triangles().get(t + 2);
                 var uv = triangleUv(world, g.vertices().get(a), g.vertices().get(b), g.vertices().get(c),
                         g.uvs().get(a), g.uvs().get(b), g.uvs().get(c));
-                if (uv.isPresent() && opaque(image, uv.get()))
+                if (uv.isPresent() && opaque(image, uv.get(),draw.color().a()))
                     return Optional.of(draw.attachmentId());
             }
         }
@@ -54,9 +55,9 @@ public final class Picker {
      * GDX textures use ClampToEdge. A legal UV of exactly 1 samples the last texel,
      * including when an interior mesh point has constant boundary UVs.
      */
-    private static boolean opaque(java.awt.image.BufferedImage image, Vec2 uv) {
+    private static boolean opaque(java.awt.image.BufferedImage image, Vec2 uv, double alpha) {
         return (image.getRGB(Math.min(image.getWidth() - 1, (int) Math.floor(uv.x() * image.getWidth())),
-                Math.min(image.getHeight() - 1, (int) Math.floor(uv.y() * image.getHeight()))) >>> 24) > 16;
+                Math.min(image.getHeight() - 1, (int) Math.floor(uv.y() * image.getHeight()))) >>> 24) * alpha > 16;
     }
 
     /**

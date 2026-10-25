@@ -9,7 +9,7 @@ import static io.github.samlinb.openbone.i18n.M.m;
  * Relative translation/rotation offsets, scale factors. Curves belong to the
  * outgoing segment.
  */
-public record Keyframe(EntityId id, double time, List<Double> values, List<Curve> curves) {
+public record Keyframe(EntityId id, double time, List<Double> values, List<Curve> curves) implements DiscreteTracks.Timed {
     public Keyframe {
         Objects.requireNonNull(id);
         time = seconds(time);

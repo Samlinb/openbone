@@ -10,14 +10,27 @@ import io.github.samlinb.openbone.core.math.Transform;
 import io.github.samlinb.openbone.core.model.*;
 
 /**
- * Editable, explicitly bounded 4.2.22 JSON subset. Unknown data is rejected
- * before publication.
+ * Editable, explicitly bounded JSON subset. 4.2.22 imports are strict;
+ * 3.8.75 imports translate legacy fields and report filtered configurations.
  * No official runtime class or source is included. Schema projects retain IDs;
  * exports use names.
  */
 public final class SkeletonJsonCodec {
     public static final String VERSION = "4.2.22";
+    public static final String VERSION_38 = Spine38Json.VERSION;
     private final ObjectMapper json = new ObjectMapper();
+    private final List<String> warnings = new ArrayList<>();
+    public List<String> warnings() { return warnings.stream().distinct().toList(); }
+
+    public byte[] encode(DocumentSnapshot d, Map<EntityId, String> regionPaths, String images, String version) throws IOException {
+        if (VERSION.equals(version)) return encode(d, regionPaths, images);
+        if (!VERSION_38.equals(version)) throw ProjectCodec.bad("$.skeleton.spine", "Unsupported version: " + version);
+        ObjectNode root = (ObjectNode)json.readTree(encode(d, regionPaths, images));
+        Spine38Json.export(root, d);
+        byte[] bytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(root);
+        if (bytes.length > ProjectCodec.MAX_BYTES) throw new ProjectFormatException("Export exceeds 16 MiB");
+        return bytes;
+    }
 
     public byte[] encode(DocumentSnapshot d, Map<EntityId, String> regionPaths, String images) throws IOException {
         RuntimeRange.validate(d);
@@ -110,6 +123,7 @@ public final class SkeletonJsonCodec {
                     s.blend().name().toLowerCase(Locale.ROOT));
             if (s.activeAttachmentId() != null)
                 n.put("attachment", attachments.get(s.activeAttachmentId()).name());
+            if (!s.color().equals(Rgba.WHITE)) n.put("color",s.color().hex());
         }
         var skinArray = root.putArray("skins");
         for (var sourceSkin : d.skins()) {
@@ -277,16 +291,37 @@ public final class SkeletonJsonCodec {
         try (var in = Files.newInputStream(file)) {
             bytes = in.readNBytes(ProjectCodec.MAX_BYTES + 1);
         }
-        return decode(bytes, file.toAbsolutePath().normalize().getParent(),
-                AtlasSubset.read(file.toAbsolutePath().normalize()));
+        boolean legacy = VERSION_38.equals(new ProjectCodec().parseTree(bytes).path("skeleton").path("spine").asText());
+        warnings.clear();
+        Map<String, AtlasSubset.Region> atlas;
+        try { atlas = AtlasSubset.read(file.toAbsolutePath().normalize(), legacy, warnings); }
+        catch (IOException invalidAtlas) {
+            if (!legacy) throw invalidAtlas;
+            warnings.add("atlas: invalid configuration filtered; using image links: " + invalidAtlas.getMessage());
+            atlas = null;
+        }
+        return decode(bytes, file.toAbsolutePath().normalize().getParent(), atlas);
     }
 
     public DocumentSnapshot decode(byte[] bytes, Path base) throws IOException {
+        warnings.clear();
         return decode(bytes, base, null);
     }
 
     private DocumentSnapshot decode(byte[] bytes, Path base, Map<String, AtlasSubset.Region> atlas) throws IOException {
         var root = new ProjectCodec().parseTree(bytes);
+        boolean legacy = VERSION_38.equals(root.path("skeleton").path("spine").asText());
+        if (legacy) root = Spine38Json.normalize(root, warnings);
+        if (legacy) {
+            try { return decodeTree(root, base, atlas, true); }
+            catch (ProjectFormatException invalid) {
+                return recover38((ObjectNode)root, base, atlas, invalid);
+            }
+        }
+        return decodeTree(root, base, atlas, false);
+    }
+
+    private DocumentSnapshot decodeTree(JsonNode root, Path base, Map<String, AtlasSubset.Region> atlas, boolean legacy) throws IOException {
         List<String> unsupported = new ArrayList<>();
         scan(root, unsupported);
         if (!unsupported.isEmpty())
@@ -327,7 +362,8 @@ public final class SkeletonJsonCodec {
                 slots.add(new Slot(slotIds.get(name), name, boneIds.get(bone), null,
                         n.has("blend") && ProjectCodec.text(n, "blend", "slots").equals("additive")
                                 ? Slot.Blend.ADDITIVE
-                                : Slot.Blend.NORMAL));
+                                : Slot.Blend.NORMAL,
+                        n.has("color") ? Rgba.parse(ProjectCodec.text(n,"color","slots")) : Rgba.WHITE));
             }
             var skins = ProjectCodec.array(root, "skins", "$");
             if (skins.isEmpty())
@@ -398,7 +434,14 @@ public final class SkeletonJsonCodec {
                             png = atlas.get(path).path();
                         }
                         // Strict import refuses missing/bad images before changing the old document.
-                        var pixels = io.github.samlinb.openbone.viewport.ImageAssets.decodePng(RuntimePng.read(png));
+                        java.awt.image.BufferedImage pixels = null;
+                        try {
+                            pixels = io.github.samlinb.openbone.viewport.ImageAssets.decodePng(
+                                    legacy ? RuntimePng.readCompatible(png) : RuntimePng.read(png));
+                        } catch (IOException invalidImage) {
+                            if (!legacy) throw invalidImage;
+                            warnings.add(p + ": image unavailable; resource link retained: " + png);
+                        }
                         var id = EntityId.create();
                         attachmentIds.put(skinName + "\0" + slot + "\0" + name, id);
                         skinEntries.computeIfAbsent(slotIds.get(slot), s -> new LinkedHashMap<>()).put(name, id);
@@ -455,10 +498,10 @@ public final class SkeletonJsonCodec {
                                 transform(n, p),
                                 num(n, "width",
                                         atlasMetadata.containsKey(id) ? atlasMetadata.get(id).originalWidth()
-                                                : pixels.getWidth(),
+                                                : pixels == null ? 1 : pixels.getWidth(),
                                         p),
                                 num(n, "height", atlasMetadata.containsKey(id) ? atlasMetadata.get(id).originalHeight()
-                                        : pixels.getHeight(), p)));
+                                        : pixels == null ? 1 : pixels.getHeight(), p)));
                     }
                 }
                 importedSkins.add(new Skin(skinName, skinEntries));
@@ -661,6 +704,106 @@ public final class SkeletonJsonCodec {
             return d;
         } catch (IllegalArgumentException | NullPointerException e) {
             throw new ProjectFormatException("Invalid 4.2.22 model: " + e.getMessage(), e);
+        }
+    }
+
+    /** Retry independent entries transactionally, so a malformed mesh or track cannot discard its siblings. */
+    private DocumentSnapshot recover38(ObjectNode source, Path base, Map<String, AtlasSubset.Region> atlas,
+            ProjectFormatException failure) throws IOException {
+        warnings.add("3.8 recovery: " + failure.getMessage());
+        ObjectNode clean = source.deepCopy();
+        clean.remove(List.of("ik", "transform", "path", "events"));
+        clean.putObject("animations");
+        for (var skin : clean.path("skins")) ((ObjectNode)skin).putObject("attachments");
+        for (var slot : clean.path("slots")) ((ObjectNode)slot).remove("attachment");
+        // The skeleton is the irreducible foundation. Do not publish an invalid hierarchy.
+        decodeTree(clean, base, atlas, true);
+        for (var it = source.path("events").fields(); it.hasNext();) {
+            var entry = it.next();
+            clean = accept38(clean, base, atlas, "$.events." + entry.getKey(),
+                    n -> n.withObject("/events").set(entry.getKey(), entry.getValue()));
+        }
+        for (int i = 0; i < source.path("skins").size(); i++) {
+            final int index = i;
+            for (var si = source.path("skins").get(i).path("attachments").fields(); si.hasNext();) {
+                var slot = si.next();
+                for (var ai = slot.getValue().fields(); ai.hasNext();) {
+                    var attachment = ai.next();
+                    clean = accept38(clean, base, atlas, "$.skins[" + i + "]." + slot.getKey() + "." + attachment.getKey(),
+                            n -> ((ObjectNode)n.path("skins").get(index).path("attachments"))
+                                    .withObject("/" + escape(slot.getKey())).set(attachment.getKey(), attachment.getValue()));
+                }
+            }
+        }
+        for (String kind : List.of("ik", "transform", "path")) {
+            int i = 0;
+            for (var constraint : source.path(kind)) {
+                clean = accept38(clean, base, atlas, "$." + kind + "[" + i++ + "]", n -> n.withArray(kind).add(constraint));
+            }
+        }
+        for (int i = 0; i < source.path("slots").size(); i++) {
+            final int index = i;
+            var slot = source.path("slots").get(i);
+            if (slot.has("attachment")) clean = accept38(clean, base, atlas, "$.slots[" + i + "].attachment",
+                    n -> ((ObjectNode)n.path("slots").get(index)).set("attachment", slot.get("attachment")));
+        }
+        for (var it = source.path("animations").fields(); it.hasNext();) {
+            var animation = it.next(); String name = animation.getKey(), pointer = "/animations/" + escape(name);
+            clean.withObject("/animations").putObject(name);
+            for (String kind : List.of("bones", "slots", "ik", "transform", "path")) {
+                for (var rows = animation.getValue().path(kind).fields(); rows.hasNext();) {
+                    var row = rows.next(); String rowPointer = pointer + "/" + kind + "/" + escape(row.getKey());
+                    if (row.getValue().isArray()) {
+                        clean = accept38(clean, base, atlas, "$.animations." + name + "." + kind + "." + row.getKey(),
+                                n -> n.withObject(pointer + "/" + kind).set(row.getKey(), row.getValue()));
+                    } else for (var tracks = row.getValue().fields(); tracks.hasNext();) {
+                        var track = tracks.next();
+                        clean = accept38(clean, base, atlas, "$.animations." + name + "." + kind + "." + row.getKey() + "." + track.getKey(),
+                                n -> n.withObject(rowPointer).set(track.getKey(), track.getValue()));
+                    }
+                }
+            }
+            for (String kind : List.of("events", "drawOrder")) {
+                int i = 0;
+                for (var key : animation.getValue().path(kind))
+                    clean = accept38(clean, base, atlas, "$.animations." + name + "." + kind + "[" + i++ + "]",
+                            n -> n.withObject(pointer).withArray(kind).add(key));
+            }
+            for (var skins = animation.getValue().path("attachments").fields(); skins.hasNext();) {
+                var skin = skins.next();
+                for (var slots = skin.getValue().fields(); slots.hasNext();) {
+                    var slot = slots.next();
+                    for (var entries = slot.getValue().fields(); entries.hasNext();) {
+                        var attachment = entries.next();
+                        clean = accept38(clean, base, atlas, "$.animations." + name + ".deform." + skin.getKey() + "." + slot.getKey() + "." + attachment.getKey(),
+                                n -> n.withObject(pointer + "/attachments/" + escape(skin.getKey()) + "/" + escape(slot.getKey()))
+                                        .set(attachment.getKey(), attachment.getValue()));
+                    }
+                }
+            }
+        }
+        return decodeTree(clean, base, atlas, true);
+    }
+
+    private ObjectNode accept38(ObjectNode current, Path base, Map<String, AtlasSubset.Region> atlas,
+            String path, java.util.function.Consumer<ObjectNode> edit) throws IOException {
+        ObjectNode candidate = current.deepCopy();
+        int count = warnings.size();
+        try {
+            edit.accept(candidate);
+            decodeTree(candidate, base, atlas, true);
+            return candidate;
+        } catch (ProjectFormatException | IllegalArgumentException invalid) {
+            warnings.add(path + ": filtered invalid configuration: " + invalid.getMessage());
+            return current;
+        } finally {
+            // Resource warnings are produced once by the final decode, not once per trial.
+            if (warnings.size() > count) {
+                var filtered = warnings.subList(count, warnings.size()).stream()
+                        .filter(w -> w.contains(": filtered invalid configuration:")).toList();
+                warnings.subList(count, warnings.size()).clear();
+                warnings.addAll(filtered);
+            }
         }
     }
 
@@ -890,8 +1033,6 @@ public final class SkeletonJsonCodec {
             allowed(s, p, errors, "name", "bone", "attachment", "blend", "color");
             if (s.has("blend") && !Set.of("normal", "additive").contains(s.get("blend").asText()))
                 errors.add(p + ".blend (only normal/additive)");
-            if (s.has("color") && !s.get("color").asText().equalsIgnoreCase("ffffffff"))
-                errors.add(p + ".color (only white)");
         }
         i = 0;
         for (var skin : ProjectCodec.array(root, "skins", "$")) {

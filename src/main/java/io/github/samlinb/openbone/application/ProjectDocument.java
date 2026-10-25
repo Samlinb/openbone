@@ -24,6 +24,9 @@ public final class ProjectDocument {
      */
     private Path resourceBase = Path.of("").toAbsolutePath();
     private boolean portable;
+    private java.util.List<String> importWarnings = java.util.List.of();
+
+    public java.util.List<String> importWarnings() { return importWarnings; }
 
     public ProjectDocument(DocumentSnapshot initial) {
         this(initial, new ProjectCodec(), new AtomicProjectFile());
@@ -109,8 +112,10 @@ public final class ProjectDocument {
 
     public void importSkeleton(Path source) throws IOException {
         history.requireIdle();
-        var loaded = new SkeletonJsonCodec().read(source);
+        var importer = new SkeletonJsonCodec();
+        var loaded = importer.read(source);
         history.reset(loaded);
+        importWarnings = importer.warnings();
         path = null;
         portable = true;
         // Import creates a new unsaved editable document, even if the source had no

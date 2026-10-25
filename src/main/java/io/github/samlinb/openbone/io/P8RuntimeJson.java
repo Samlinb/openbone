@@ -45,7 +45,7 @@ final class P8RuntimeJson {
         return result;
     }
 
-    static void write(ObjectNode node, DocumentSnapshot d, AnimationClip clip) {
+    static void write(ObjectNode node, DocumentSnapshot d, AnimationClip clip) throws ProjectFormatException {
         Map<EntityId, Slot> slots = new HashMap<>();
         d.slots().forEach(s -> slots.put(s.id(), s));
         if (!clip.discrete().attachments().isEmpty()) {
@@ -82,6 +82,7 @@ final class P8RuntimeJson {
                     n.put("volume", k.volume()).put("balance", k.balance());
             }
         }
+        SlotColorJson.write(node,d,clip.discrete().colors());
     }
 
     static DiscreteTracks read(JsonNode node, List<Slot> slots, List<EventDefinition> definitions)
@@ -98,7 +99,8 @@ final class P8RuntimeJson {
                 Slot slot = byName.get(row.getKey());
                 if (slot == null)
                     throw bad("animation.slots", "Unknown slot");
-                only(row.getValue(), "animation.slots", "attachment");
+                only(row.getValue(), "animation.slots", "attachment", "rgba", "rgb", "alpha");
+                if (!row.getValue().has("attachment")) continue;
                 double previous = -1;
                 for (var k : array(row.getValue(), "attachment", "animation.slots")) {
                     only(k, "attachment.key", "time", "name");
@@ -165,7 +167,7 @@ final class P8RuntimeJson {
                         number(k, "volume", def.volume()), number(k, "balance", def.balance())));
             }
         }
-        return new DiscreteTracks(a, o, e);
+        return new DiscreteTracks(a, o, e, SlotColorJson.read(node, slots));
     }
 
     /**
@@ -189,7 +191,7 @@ final class P8RuntimeJson {
                 for (var rows = n.get("slots").fields(); rows.hasNext();) {
                     var row = rows.next();
                     String q = p + ".slots." + row.getKey();
-                    if (scanObject(row.getValue(), q, errors, "attachment") && row.getValue().has("attachment")
+                    if (scanObject(row.getValue(), q, errors, "attachment", "rgba", "rgb", "alpha") && row.getValue().has("attachment")
                             && scanArray(row.getValue().get("attachment"), q + ".attachment", errors)) {
                         int i = 0;
                         for (var k : row.getValue().get("attachment"))
