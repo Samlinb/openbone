@@ -1,0 +1,19 @@
+Openbone P3 runtime dependencies:
+libGDX 1.12.1, gdx-jnigen-loader 2.3.1, Apache License 2.0.
+LWJGL 2.9.3 and JInput 2.0.5 / JUtils 1.0.0, BSD licenses.
+Official Maven native libraries are bundled for extraction by the upstream loaders.
+Full graphics/input copyright notices, AUTHORS and third-party notices: licenses/.
+https://github.com/libgdx/libgdx/tree/1.12.1
+https://github.com/LWJGL/lwjgl/tree/lwjgl2.9.3
+Audio is disabled; optional JLayer/JOrbis are excluded from the editor distribution.
+
+Jackson databind, annotations and core 2.18.3 (FasterXML), Apache License 2.0.
+https://github.com/FasterXML/jackson-databind/tree/jackson-databind-2.18.3
+https://github.com/FasterXML/jackson-core/tree/jackson-core-2.18.3
+All upstream LICENSE and NOTICE files are concatenated into META-INF/LICENSE
+and META-INF/NOTICE in the executable JAR. jackson-core's FastDoubleParser MIT
+notice is retained there as well.
+
+Build/test only: JUnit Jupiter 5.11.4, Eclipse Public License 2.0.
+Official Spine JSON sample and its license are test resources only; 
+Spine runtime code is included in the product.
