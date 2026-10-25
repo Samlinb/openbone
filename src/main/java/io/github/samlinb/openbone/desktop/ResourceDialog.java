@@ -37,9 +37,15 @@ final class ResourceDialog extends JDialog {
             volume = new JTextField("1"), balance = new JTextField("0");
     private List<EntityId> attachmentIds = List.of(), eventIds = List.of();
     private boolean refreshing;
+    private final ImageResourcePanel images;
 
     ResourceDialog(Component parent, CommandHistory history, Supplier<EntityId> active, double time, Runnable changed,
             Consumer<Exception> error) {
+        this(parent,history,active,time,changed,error,()->Path.of("").toAbsolutePath());
+    }
+
+    ResourceDialog(Component parent, CommandHistory history, Supplier<EntityId> active, double time, Runnable changed,
+            Consumer<Exception> error,Supplier<Path> base) {
         super(SwingUtilities.getWindowAncestor(parent), m("resourcedialog.0001"), ModalityType.APPLICATION_MODAL);
         this.history = history;
         this.active = active;
@@ -70,6 +76,9 @@ final class ResourceDialog extends JDialog {
         var tabs = new JTabbedPane();
         tabs.setName("p8.tabs");
         root.add(tabs);
+        images=new ImageResourcePanel("p8.images",()->history,base,()->true,()->{changed.run();refresh();},error,
+                id->{history.select(Selection.of(id));changed.run();});
+        tabs.addTab(m("images.title"),images);
         tabs.addTab(m("resourcedialog.0003"), skinPanel());
         tabs.addTab(m("resourcedialog.0004"), attachmentPanel());
         tabs.addTab(m("resourcedialog.0005"), eventPanel());
@@ -361,6 +370,7 @@ final class ResourceDialog extends JDialog {
     private void refresh() {
         refreshing = true;
         try {
+            images.refresh();
             String selectedSlot = (String) slot.getSelectedItem(), selectedEvent = (String) event.getSelectedItem();
             skin.removeAllItems();
             model().skins().forEach(s -> skin.addItem(s.name()));

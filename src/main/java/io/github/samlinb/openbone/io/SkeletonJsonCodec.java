@@ -11,7 +11,7 @@ import io.github.samlinb.openbone.core.model.*;
 
 /**
  * Editable, explicitly bounded JSON subset. 4.2.22 imports are strict;
- * 3.8.75 imports translate legacy fields and report filtered configurations.
+ * 3.8.x imports translate legacy fields and report filtered configurations.
  * No official runtime class or source is included. Schema projects retain IDs;
  * exports use names.
  */
@@ -20,6 +20,7 @@ public final class SkeletonJsonCodec {
     public static final String VERSION_38 = Spine38Json.VERSION;
     private final ObjectMapper json = new ObjectMapper();
     private final List<String> warnings = new ArrayList<>();
+    private final Map<Path,java.awt.image.BufferedImage> importedImages = new HashMap<>();
     public List<String> warnings() { return warnings.stream().distinct().toList(); }
 
     public byte[] encode(DocumentSnapshot d, Map<EntityId, String> regionPaths, String images, String version) throws IOException {
@@ -286,13 +287,18 @@ public final class SkeletonJsonCodec {
     }
 
     public DocumentSnapshot read(Path file) throws IOException {
+        return read(file,file.toAbsolutePath().normalize().getParent());
+    }
+
+    public DocumentSnapshot read(Path file, Path imageBase) throws IOException {
         ProjectCodec.requireProjectPath(file);
         byte[] bytes;
         try (var in = Files.newInputStream(file)) {
             bytes = in.readNBytes(ProjectCodec.MAX_BYTES + 1);
         }
-        boolean legacy = VERSION_38.equals(new ProjectCodec().parseTree(bytes).path("skeleton").path("spine").asText());
+        boolean legacy = Spine38Json.supports(new ProjectCodec().parseTree(bytes).path("skeleton").path("spine").asText());
         warnings.clear();
+        importedImages.clear();
         Map<String, AtlasSubset.Region> atlas;
         try { atlas = AtlasSubset.read(file.toAbsolutePath().normalize(), legacy, warnings); }
         catch (IOException invalidAtlas) {
@@ -300,22 +306,25 @@ public final class SkeletonJsonCodec {
             warnings.add("atlas: invalid configuration filtered; using image links: " + invalidAtlas.getMessage());
             atlas = null;
         }
-        return decode(bytes, file.toAbsolutePath().normalize().getParent(), atlas);
+        return decode(bytes, imageBase.toAbsolutePath().normalize(), atlas);
     }
 
     public DocumentSnapshot decode(byte[] bytes, Path base) throws IOException {
         warnings.clear();
+        importedImages.clear();
         return decode(bytes, base, null);
     }
 
     private DocumentSnapshot decode(byte[] bytes, Path base, Map<String, AtlasSubset.Region> atlas) throws IOException {
         var root = new ProjectCodec().parseTree(bytes);
-        boolean legacy = VERSION_38.equals(root.path("skeleton").path("spine").asText());
-        if (legacy) root = Spine38Json.normalize(root, warnings);
+        boolean legacy = Spine38Json.supports(root.path("skeleton").path("spine").asText());
         if (legacy) {
-            try { return decodeTree(root, base, atlas, true); }
-            catch (ProjectFormatException invalid) {
-                return recover38((ObjectNode)root, base, atlas, invalid);
+            try(var cache=io.github.samlinb.openbone.core.math.MeshTopology.cacheValidations()) {
+                root = Spine38Json.normalize(root, warnings);
+                try { return decodeTree(root, base, atlas, true); }
+                catch (ProjectFormatException invalid) {
+                    return recover38((ObjectNode)root, base, atlas, invalid);
+                }
             }
         }
         return decodeTree(root, base, atlas, false);
@@ -436,8 +445,12 @@ public final class SkeletonJsonCodec {
                         // Strict import refuses missing/bad images before changing the old document.
                         java.awt.image.BufferedImage pixels = null;
                         try {
-                            pixels = io.github.samlinb.openbone.viewport.ImageAssets.decodePng(
-                                    legacy ? RuntimePng.readCompatible(png) : RuntimePng.read(png));
+                            pixels = importedImages.get(png);
+                            if(pixels==null) {
+                                pixels=io.github.samlinb.openbone.viewport.ImageAssets.decodePng(
+                                        legacy ? RuntimePng.readCompatible(png) : RuntimePng.read(png));
+                                importedImages.put(png,pixels);
+                            }
                         } catch (IOException invalidImage) {
                             if (!legacy) throw invalidImage;
                             warnings.add(p + ": image unavailable; resource link retained: " + png);
@@ -480,7 +493,13 @@ public final class SkeletonJsonCodec {
                                                 new io.github.samlinb.openbone.core.math.Vec2(values[0], values[1]),
                                                 values[2]));
                                     }
-                                    Influence.validate(row);
+                                    try { Influence.validate(row); }
+                                    catch(IllegalArgumentException invalid) {
+                                        double total=row.stream().mapToDouble(Influence::weight).sum();
+                                        if(!legacy || Math.abs(total-1)>.001) throw invalid;
+                                        row=new ArrayList<>(Influence.normalize(row));
+                                        warnings.add(p+".vertices: normalized rounded 3.8 weights");
+                                    }
                                     weights.add(row);
                                 }
                                 if (cursor != raw.size())
@@ -710,6 +729,9 @@ public final class SkeletonJsonCodec {
     /** Retry independent entries transactionally, so a malformed mesh or track cannot discard its siblings. */
     private DocumentSnapshot recover38(ObjectNode source, Path base, Map<String, AtlasSubset.Region> atlas,
             ProjectFormatException failure) throws IOException {
+        record Deferred(String path,java.util.function.Consumer<ObjectNode> edit) {}
+        var clipping=new ArrayList<Deferred>();
+        var clippingSetup=new ArrayList<Deferred>();
         warnings.add("3.8 recovery: " + failure.getMessage());
         ObjectNode clean = source.deepCopy();
         clean.remove(List.of("ik", "transform", "path", "events"));
@@ -729,6 +751,12 @@ public final class SkeletonJsonCodec {
                 var slot = si.next();
                 for (var ai = slot.getValue().fields(); ai.hasNext();) {
                     var attachment = ai.next();
+                    if(attachment.getValue().path("type").asText().equals("clipping")) {
+                        clipping.add(new Deferred("$.skins["+i+"]."+slot.getKey()+"."+attachment.getKey(),
+                                n->((ObjectNode)n.path("skins").get(index).path("attachments"))
+                                        .withObject("/"+escape(slot.getKey())).set(attachment.getKey(),attachment.getValue())));
+                        continue;
+                    }
                     clean = accept38(clean, base, atlas, "$.skins[" + i + "]." + slot.getKey() + "." + attachment.getKey(),
                             n -> ((ObjectNode)n.path("skins").get(index).path("attachments"))
                                     .withObject("/" + escape(slot.getKey())).set(attachment.getKey(), attachment.getValue()));
@@ -744,6 +772,13 @@ public final class SkeletonJsonCodec {
         for (int i = 0; i < source.path("slots").size(); i++) {
             final int index = i;
             var slot = source.path("slots").get(i);
+            boolean clippingAttachment=false;
+            for(var skin:source.path("skins")) clippingAttachment|=skin.path("attachments").path(slot.path("name").asText())
+                    .path(slot.path("attachment").asText()).path("type").asText().equals("clipping");
+            if(clippingAttachment) {
+                clippingSetup.add(new Deferred("$.slots["+i+"].attachment",n->((ObjectNode)n.path("slots").get(index)).set("attachment",slot.get("attachment"))));
+                continue;
+            }
             if (slot.has("attachment")) clean = accept38(clean, base, atlas, "$.slots[" + i + "].attachment",
                     n -> ((ObjectNode)n.path("slots").get(index)).set("attachment", slot.get("attachment")));
         }
@@ -782,6 +817,9 @@ public final class SkeletonJsonCodec {
                 }
             }
         }
+        // A single clipping mask must not discard every otherwise valid constraint and attachment track.
+        for(var deferred:clipping) clean=accept38(clean,base,atlas,deferred.path(),deferred.edit());
+        for(var deferred:clippingSetup) clean=accept38(clean,base,atlas,deferred.path(),deferred.edit());
         return decodeTree(clean, base, atlas, true);
     }
 

@@ -9,6 +9,7 @@ import io.github.samlinb.openbone.core.model.*;
 /** Independent translation of the 3.8 JSON schema to the editor's supported subset. */
 final class Spine38Json {
     static final String VERSION = "3.8.75";
+    static boolean supports(String version) { return version!=null && version.matches("3\\.8\\.[0-9]+"); }
     private Spine38Json() {}
 
     static void fields(ObjectNode n, String p, List<String> warnings, String... names) {

@@ -33,6 +33,8 @@ final class AnimationPanel extends JPanel {
         void poseChanged();
 
         Map<String, JComponent> controls();
+        default java.nio.file.Path imageBase() { return java.nio.file.Path.of("").toAbsolutePath(); }
+        default void resourcesChanged() { changed(); }
     }
 
     private final Host host;
@@ -104,7 +106,7 @@ final class AnimationPanel extends JPanel {
             if (!prepare())
                 return;
             clock.seek(clock.time());
-            new ResourceDialog(this, host.history(), this::active, clock.time(), host::changed, host::error)
+            new ResourceDialog(this, host.history(), this::active, clock.time(), host::resourcesChanged, host::error,host::imageBase)
                     .setVisible(true);
         });
         resources.add(eventStatus);

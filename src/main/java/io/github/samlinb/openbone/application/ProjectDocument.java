@@ -51,6 +51,7 @@ public final class ProjectDocument {
     }
 
     public void openResolved(Path source) throws IOException {
+        if(SpineProjectSource.isNative(source)) { importSkeleton(source); return; }
         history.requireIdle();
         var raw = codec.read(source);
         var loaded = ResourcePaths.absolute(raw, source.toAbsolutePath().normalize().getParent());
@@ -112,10 +113,13 @@ public final class ProjectDocument {
 
     public void importSkeleton(Path source) throws IOException {
         history.requireIdle();
+        SpineProjectSource nativeSource=SpineProjectSource.isNative(source)?SpineProjectSource.resolve(source):null;
         var importer = new SkeletonJsonCodec();
-        var loaded = importer.read(source);
+        var loaded = nativeSource==null?importer.read(source):importer.read(nativeSource.json(),nativeSource.imageBase());
+        var report=new java.util.ArrayList<>(importer.warnings());
+        if(nativeSource!=null) report.add(0,m("spineProject.snapshotWarning",nativeSource.json()));
         history.reset(loaded);
-        importWarnings = importer.warnings();
+        importWarnings = java.util.List.copyOf(report);
         path = null;
         portable = true;
         // Import creates a new unsaved editable document, even if the source had no

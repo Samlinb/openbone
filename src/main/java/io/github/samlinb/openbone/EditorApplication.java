@@ -51,7 +51,7 @@ public final class EditorApplication {
         }
         if (args.length != 0 && !(args.length == 2 && "--open".equals(args[0]))) {
             System.err.println(
-                    "Usage: --version | --validate-project <schema-project.json> | --open <schema-project.json>");
+                    "Usage: --version | --validate-project <schema-project.json> | --open <project.json|project.spine>");
             System.exit(2);
             return;
         }

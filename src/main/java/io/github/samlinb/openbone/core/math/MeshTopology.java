@@ -15,6 +15,17 @@ import static io.github.samlinb.openbone.i18n.M.m;
  */
 public final class MeshTopology {
     public static final int MAX_VERTICES = 512;
+    private record Validated(List<Vec2> vertices, int hull, List<Integer> triangles) {}
+    private static final ThreadLocal<LinkedHashMap<Validated,Boolean>> VALIDATED = new ThreadLocal<>();
+
+    /** Reuse exact, immutable successful validations only within one import operation. */
+    public static final class ValidationCache implements AutoCloseable {
+        private final LinkedHashMap<Validated,Boolean> previous=VALIDATED.get();
+        private ValidationCache() { if(previous==null) VALIDATED.set(new LinkedHashMap<>()); }
+        @Override public void close() { if(previous==null) VALIDATED.remove(); else VALIDATED.set(previous); }
+    }
+
+    public static ValidationCache cacheValidations() { return new ValidationCache(); }
 
     private MeshTopology() {
     }
@@ -228,6 +239,16 @@ public final class MeshTopology {
     }
 
     public static void validate(List<Vec2> v, int hull, List<Integer> triangles) {
+        var cache=VALIDATED.get();
+        if(cache==null) { validateUncached(v,hull,triangles); return; }
+        var key=new Validated(List.copyOf(v),hull,List.copyOf(triangles));
+        if(cache.containsKey(key)) return;
+        validateUncached(key.vertices(),hull,key.triangles());
+        cache.put(key,Boolean.TRUE);
+        if(cache.size()>256) cache.remove(cache.keySet().iterator().next());
+    }
+
+    private static void validateUncached(List<Vec2> v, int hull, List<Integer> triangles) {
         boundary(v, hull);
         if (triangles.size() != 3 * (2 * v.size() - hull - 2))
             throw new IllegalArgumentException(m("meshtopology.0012"));

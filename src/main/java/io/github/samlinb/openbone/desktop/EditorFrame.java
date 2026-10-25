@@ -30,6 +30,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
     private final ImageAssets assets = new ImageAssets();
     private final EditorViewport viewport;
     private final AnimationPanel animation;
+    private final ImageResourcePanel imageResources;
+    private final JTabbedPane navigation = new JTabbedPane();
     private final PhysicsPlayer physics = new PhysicsPlayer();
     private final JTree tree = new JTree();
     private final JPanel properties = new PropertyPanel();
@@ -214,6 +216,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             public Map<String, JComponent> controls() {
                 return named;
             }
+            public Path imageBase() { return EditorFrame.this.imageBase(); }
+            public void resourcesChanged() { assets.reload();EditorFrame.this.changed(); }
         });
         setJMenuBar(menus());
         JPanel main = new JPanel(new BorderLayout());
@@ -248,7 +252,13 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         JScrollPane hierarchy = new JScrollPane(tree);
         hierarchy.setPreferredSize(new Dimension(220, 600));
         hierarchy.setMinimumSize(new Dimension(160, 100));
-        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, hierarchy, right);
+        imageResources=new ImageResourcePanel("workspace.images",this::history,this::imageBase,()->{
+            if(!commitFocusedField()) return false;viewportCancel();return true;
+        },()->{assets.reload();changed();},this::error,id->{history().select(Selection.of(id));changed();});
+        navigation.setName("workspace.navigation");
+        navigation.addTab(m("images.hierarchy"),hierarchy);navigation.addTab(m("images.title"),imageResources);
+        navigation.setPreferredSize(new Dimension(240,600));navigation.setMinimumSize(new Dimension(160,100));
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, navigation, right);
         split.setDividerLocation(220);
         split.setResizeWeight(0);
         hierarchySplit = split;
@@ -745,6 +755,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             rebuildTree();
             rebuildProperties();
             animation.refresh();
+            if(imageResources!=null) imageResources.refresh();
             long missing = model().attachments().stream().filter(a -> a.source() != null)
                     .map(a -> assets.get(a.source())).filter(ImageAssets.Image::missing).count();
             status.setText(m("editorframe.0066") + model().bones().size() + m("editorframe.0067")
@@ -1966,9 +1977,9 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         if (p == null)
             return;
         guard(() -> {
-            ImageAssets.readPng(p);
-            String source = resourceSource(p);
-            edit(m("editorframe.0288"), d -> MeshEdits.replace(d, m.id(), a -> MeshEdits.source(a, source)));
+            var entry=ImageResources.list(model(),imageBase()).stream().filter(e->e.attachments().contains(m.id())).findFirst().orElseThrow();
+            var result=ImageResources.replace(model(),imageBase(),entry,p);
+            edit(m("editorframe.0288"), d -> result);
             assets.reload();
             changed();
         });
@@ -2297,10 +2308,9 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         if (p == null)
             return;
         guard(() -> {
-            ImageAssets.readPng(p);
-            String source = resourceSource(p);
-            edit(m("editorframe.0311"), d -> ModelEdits.editRegion(d, r.id(),
-                    a -> new RegionAttachment(a.id(), a.name(), a.slotId(), source, a.local(), a.width(), a.height())));
+            var entry=ImageResources.list(model(),imageBase()).stream().filter(e->e.attachments().contains(r.id())).findFirst().orElseThrow();
+            var result=ImageResources.replace(model(),imageBase(),entry,p);
+            edit(m("editorframe.0311"), d -> result);
             assets.reload();
             changed();
         });
@@ -2378,6 +2388,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         if (!commitFocusedField())
             return;
         var c = chooser(m("editorframe.0326"));
+        c.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(m("editorframe.projectFiles"),"json","spine"));
         if (c.showOpenDialog(this) != JFileChooser.APPROVE_OPTION)
             return;
         // Validate a replacement fully BEFORE asking to save/discard the current
@@ -2392,6 +2403,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             resetAssets();
             viewport.camera().reset();
             changed();
+            if(SpineProjectSource.isNative(c.getSelectedFile().toPath())) { frameImportedProject();showImportReport(); }
         });
     }
 
@@ -2424,6 +2436,10 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
 
     private void openResolved(Path source) throws Exception {
         document.openResolved(source);
+        if(SpineProjectSource.isNative(source)) {
+            animation.reset();viewport.camera().reset();
+            SwingUtilities.invokeLater(()->{frameImportedProject();showImportReport();});
+        }
     }
 
     private void savePortable() {
@@ -2467,11 +2483,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             changed();
             message(m("editorframe.0335"));
             offerAtlasSplit(source);
-            if (!next.importWarnings().isEmpty()) {
-                var report = new JTextArea(String.join("\n", next.importWarnings()), 18, 90);
-                report.setEditable(false);
-                JOptionPane.showMessageDialog(this, new JScrollPane(report), m("editorframe.spineImportReport"), JOptionPane.WARNING_MESSAGE);
-            }
+            showImportReport();
         });
     }
 
@@ -2508,14 +2520,36 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         document.history().execute(m("editorframe.splitAtlasTitle"),Commands.model(d->split.document()));
         resetAssets();
         changed();
+        navigation.setSelectedComponent(imageResources);
         message(m("editorframe.splitAtlasDone")+split.directory());
         JOptionPane.showMessageDialog(this,m("editorframe.splitAtlasDone")+split.directory()+"\n"+split.images()+m("editorframe.splitAtlasCount"),
                 m("editorframe.splitAtlasTitle"),JOptionPane.INFORMATION_MESSAGE);
     }
 
+    private void showImportReport() {
+        if(document.importWarnings().isEmpty()) return;
+        var report=new JTextArea(String.join("\n",document.importWarnings()),18,90);
+        report.setEditable(false);report.setCaretPosition(0);
+        JOptionPane.showMessageDialog(this,new JScrollPane(report),m("editorframe.spineImportReport"),JOptionPane.WARNING_MESSAGE);
+    }
+
+    private void frameImportedProject() {
+        var points=VisibleGeometry.evaluate(model(),model().evaluateWorld()).stream().filter(d->d.color().a()>0)
+                .flatMap(d->d.geometry().vertices().stream()).toList();
+        if(points.isEmpty()) return;
+        double minX=points.stream().mapToDouble(Vec2::x).min().orElse(0),maxX=points.stream().mapToDouble(Vec2::x).max().orElse(0);
+        double minY=points.stream().mapToDouble(Vec2::y).min().orElse(0),maxY=points.stream().mapToDouble(Vec2::y).max().orElse(0);
+        int width=Math.max(1,viewport.canvas().getWidth()),height=Math.max(1,viewport.canvas().getHeight());
+        double zoom=Math.min(width*.85/Math.max(1,maxX-minX),height*.85/Math.max(1,maxY-minY));
+        var camera=viewport.camera();camera.reset();camera.zoomAt(zoom,width/2.,height/2.,width,height);
+        camera.pan(-(minX/2+maxX/2)*camera.zoom(),(minY/2+maxY/2)*camera.zoom());changed();
+    }
+
     private void resetAssets() {
         assets.base(document.path().map(Path::getParent).orElse(Path.of("").toAbsolutePath()));
     }
+
+    private Path imageBase() { return document.path().map(Path::getParent).orElse(Path.of("").toAbsolutePath()); }
 
     private void closeRequested() {
         if (!confirmSave())
