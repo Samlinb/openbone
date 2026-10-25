@@ -29,7 +29,7 @@ public final class EditorApplication {
         }
         if (args.length == 1 && "--version".equals(args[0])) {
             System.out
-                    .println("Openbone 0.1.0-SNAPSHOT (P9 recovery/layout/self-contained desktop, JSON 4.2.22 subset)");
+                    .println("Openbone 0.1.0");
             return;
         }
         if (args.length == 2 && "--validate-project".equals(args[0])) {
