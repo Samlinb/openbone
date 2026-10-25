@@ -21,6 +21,7 @@ jobs:
         distribution: 'temurin'
         server-id: github
         settings-path: ${{ github.workspace }}
+        cache: maven
 
     - name: Build and Publish with Maven
       run: mvn -B deploy --file pom.xml
@@ -29,8 +30,9 @@ jobs:
 
    
     - name: Upload Release Asset
-      uses: actions/softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v2
       with:
-        files: target/*.jar
+        files: target/openbone-*.jar
+        fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
