@@ -36,6 +36,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
     private final PhysicsPlayer physics = new PhysicsPlayer();
     private EditorMcpServer mcpServer;
     private String mcpToken;
+    private McpControlDialog mcpControl;
+    private long mcpLifecycle;
     private final JTree tree = new JTree();
     private final JPanel properties = new PropertyPanel();
     private final JLabel status = new JLabel(" ");
@@ -342,8 +344,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
     public void showEditor() {
         setVisible(true);
         viewport.canvas().requestFocusInWindow();
-        if (System.getProperty("openbone.mcp.port") != null)
-            guard(() -> startMcp(Integer.parseInt(System.getProperty("openbone.mcp.port"))));
+        autoStartMcp();
         SwingUtilities.invokeLater(() -> {
             chooseRecovery(false);
         });
@@ -615,26 +616,23 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         bar.add(file);
         bar.add(edit);
         bar.add(view);
-        JMenu mcp = new JMenu("MCP");
-        menu(mcp, m("mcp.start"), null, () -> { startMcp(0); showMcpConnection(); });
-        menu(mcp, m("mcp.connection"), null, this::showMcpConnection);
-        menu(mcp, m("mcp.stop"), null, () -> {
-            if (mcpServer != null) { mcpServer.close(); mcpServer = null; mcpToken = null; }
-            message(m("mcp.stopped"));
-        });
+        var mcp = new JButton("MCP");
+        mcp.setName("mcp.openControl");
+        mcp.addActionListener(e -> showMcpConnection());
         bar.add(mcp);
         return bar;
 
     }
 
-    private void startMcp(int port) {
-        if (mcpServer != null) return;
-        String configured = System.getenv("OPENBONE_MCP_TOKEN");
-        if (configured == null || configured.isBlank()) {
-            byte[] secret = new byte[32]; new java.security.SecureRandom().nextBytes(secret);
-            configured = Base64.getUrlEncoder().withoutPadding().encodeToString(secret);
-        }
-        String token = configured;
+    private void stopMcp() {
+        mcpLifecycle++;
+        if (mcpServer != null) { mcpServer.close(); mcpServer = null; mcpToken = null; }
+        message(m("mcp.stopped"));
+    }
+
+    private void startMcp(int port, String token) {
+        if (mcpServer != null || closing || !isDisplayable()) return;
+        mcpLifecycle++;
         var tools = new EditorMcpTools(new EditorMcpTools.Host() {
             public CommandHistory history() { return EditorFrame.this.history(); }
             public Map<String, Object> context() {
@@ -691,17 +689,41 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             mcpServer = new EditorMcpServer(port, token, tools);
             mcpToken = token;
             message(m("mcp.started") + " " + mcpServer.url());
+        } catch (java.net.BindException occupied) {
+            throw new IllegalStateException(m("mcp.portInUse") + " " + port, occupied);
         } catch (java.io.IOException failed) { throw new IllegalStateException("Cannot start MCP: " + failed.getMessage(), failed); }
     }
 
     private void showMcpConnection() {
-        if (mcpServer == null) { message(m("mcp.stopped")); return; }
-        var dialog = new JDialog(this, m("mcp.connection"), false);
-        var text = new JTextArea("URL: " + mcpServer.url() + "\n\nAuthorization: Bearer " + mcpToken
-                + "\n\n" + m("mcp.connectionHelp"), 9, 76);
-        text.setEditable(false); text.setLineWrap(true); text.setWrapStyleWord(true);
-        text.setMargin(new Insets(12, 12, 12, 12));
-        dialog.add(new JScrollPane(text)); dialog.pack(); dialog.setLocationRelativeTo(this); dialog.setVisible(true);
+        if (mcpControl == null || !mcpControl.isDisplayable())
+            mcpControl = new McpControlDialog(this, new McpControlDialog.Host() {
+                public boolean available() { return !closing && EditorFrame.this.isDisplayable(); }
+                public boolean running() { return mcpServer != null; }
+                public String url() { return mcpServer == null ? "" : mcpServer.url(); }
+                public String token() { return mcpToken == null ? "" : mcpToken; }
+                public void start(int port, String token) { startMcp(port, token); }
+                public void stop() { stopMcp(); }
+            });
+        mcpControl.setVisible(true);
+        mcpControl.toFront();
+    }
+
+    private void autoStartMcp() {
+        long lifecycle = mcpLifecycle;
+        new SwingWorker<String, Void>() {
+            private int port;
+            protected String doInBackground() throws Exception {
+                var state = McpConnectionSettings.read(McpConnectionSettings.path());
+                if (!state.autoStart()) return null;
+                port = McpConnectionSettings.port();
+                return McpConnectionSettings.token(state);
+            }
+            protected void done() {
+                if (closing || !isDisplayable() || lifecycle != mcpLifecycle) return;
+                try { String token = get(); if (token != null) startMcp(port, token); }
+                catch (Exception failed) { error(new IllegalStateException(m("mcp.operationFailed"), failed)); }
+            }
+        }.execute();
     }
 
     /** Language menu labels stay in their native form regardless of UI locale. */

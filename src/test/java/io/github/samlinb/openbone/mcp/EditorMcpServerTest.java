@@ -55,7 +55,8 @@ class EditorMcpServerTest {
     HttpResponse<String> post(JsonNode body) throws Exception { return request("POST", JSON.writeValueAsString(body), TOKEN, null, "application/json, text/event-stream", null); }
     HttpResponse<String> request(String method, String body, String token, String origin, String accept, String version) throws Exception {
         var b = HttpRequest.newBuilder(URI.create(server.url())).timeout(java.time.Duration.ofSeconds(15))
-                .header("Authorization", "Bearer " + token).header("Content-Type", "application/json").header("Accept", accept);
+                .header("Content-Type", "application/json").header("Accept", accept);
+        if (token != null) b.header("Authorization", "Bearer " + token);
         if (origin != null) b.header("Origin", origin);
         if (version != null) b.header("MCP-Protocol-Version", version);
         return http.send(b.method(method, HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
@@ -181,6 +182,34 @@ class EditorMcpServerTest {
         assertTrue(call("openbone_query_scene", Map.of("kind", "keyframes", "animationId", "bad-id")).path("isError").asBoolean());
         assertTrue(call("openbone_apply_edits", mutation(revision(), create(), key(-1, "ROTATE", 1))).path("isError").asBoolean());
         assertTrue(call("openbone_apply_edits", mutation(revision(), create(), key(0, "SCALE", 1, Double.NaN))).path("isError").asBoolean());
+    }
+
+    @Test void explicitPortAndTokenRemainUsableAfterRestartAndConflictsDoNotFallback() throws Exception {
+        int port = URI.create(server.url()).getPort();
+        String originalUrl = server.url();
+        assertThrows(java.net.BindException.class, () -> new EditorMcpServer(port, TOKEN, new EditorMcpTools(host)));
+        assertTrue(rpc("ping", Map.of()).has("result"));
+        server.close();
+        server = new EditorMcpServer(port, TOKEN, new EditorMcpTools(host));
+        assertEquals(originalUrl, server.url());
+        assertTrue(rpc("ping", Map.of()).has("result"));
+        assertEquals(401, request("POST", "{}", "wrong", null, "application/json, text/event-stream", null).statusCode());
+    }
+
+    @Test void localConnectionsNeedNoCredentialsUnlessExplicitlyConfigured() throws Exception {
+        String ping = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}";
+        assertEquals(401, request("POST", ping, null, null, "application/json, text/event-stream", null).statusCode());
+        for (String optionalToken : Arrays.asList(null, "")) {
+            server.close();
+            server = new EditorMcpServer(0, optionalToken, new EditorMcpTools(host));
+            var response = request("POST", ping, null, null, "application/json, text/event-stream", null);
+            assertEquals(200, response.statusCode());
+            assertTrue(JSON.readTree(response.body()).has("result"));
+            assertTrue(response.headers().firstValue("WWW-Authenticate").isEmpty());
+            assertEquals(403, request("POST", ping, null, "https://evil.example", "application/json, text/event-stream", null).statusCode());
+            assertEquals("127.0.0.1", URI.create(server.url()).getHost());
+        }
+        assertThrows(IllegalArgumentException.class, () -> new EditorMcpServer(0, "short", new EditorMcpTools(host)));
     }
 
     @Test void transportRejectsUnauthorizedOriginsVersionsAndMalformedMessages() throws Exception {

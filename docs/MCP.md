@@ -6,25 +6,25 @@ MCP is a core feature of the project. An external AI can connect to a running Op
 
 ## Starting and connecting
 
-1. Build and start the latest program: `mvn package`, then run `java -jar target/openbone-0.1.3.jar` (the file name depends on the current POM version).
-2. Open a project and choose **MCP → Start MCP and show connection**.
-3. In an MCP client on the same machine that supports Streamable HTTP, enter the URL shown in the window and set the `Authorization: Bearer <token>` request header.
-4. The connection information window can stay open; before calling, close modal dialogs such as file pickers, and finish or cancel any in-progress preview drag.
-5. **MCP → Stop MCP** disconnects the service; closing the editor normally also stops it.
+1. Build and start the latest program: `mvn package`, then run `java -jar target/openbone-0.2.1.jar` (the file name depends on the current POM version).
+2. Click **MCP** in the menu bar to open the non-modal control window. It contains port, optional token, automatic startup, Start/Stop buttons, live status and the endpoint URL.
+3. Set the port (default `39871`). Leave the token empty for local connections without authentication. To enable authentication, enter 32–256 ASCII letters, digits, underscores or hyphens; clients then send `Authorization: Bearer <token>`. The token is masked unless **Show token** is selected.
+4. **Save settings** remembers port, token and the **Start MCP automatically when OpenBone opens** checkbox. **Start** also saves before starting. The checkbox is off by default; simply specifying a startup port no longer enables automatic startup. Once saved, it controls future application launches.
+5. While running, the window shows **Running**, the actual bound URL and whether authentication is enabled. Port and token stay read-only until **Stop**. Closing this control window keeps MCP running; closing the editor stops it. The control window can stay open during tool calls; modal file dialogs must be closed before tools can edit.
 
-The service is off by default. Starting it from the menu uses a random free port and a random token; every restart generates new connection information, while a token supplied through an environment variable stays fixed. Multiple editor windows each provide their own service and never operate other windows. Connection information lives only in process memory and is never written to the project or to normal logs.
+The stable default endpoint is `http://127.0.0.1:39871/mcp`. Port conflicts appear in the control window and never trigger a random fallback or terminate another instance. Multiple editor instances must use different ports.
 
-For automated startup, you can pin the port and supply the token through an environment variable:
+Port precedence is `-Dopenbone.mcp.port` → `OPENBONE_MCP_PORT` → the saved port → `39871`. Token precedence is `OPENBONE_MCP_TOKEN` → the saved token → no authentication. An empty environment token explicitly disables authentication. Overridden fields are marked read-only in the window; change the startup configuration to change them. For example:
 
 ```powershell
-# Use a self-generated random token: 32 to 256 letters, digits, underscores, and hyphens.
-$env:OPENBONE_MCP_TOKEN = '<random token>'
-java -Dopenbone.mcp.port=39871 -jar target/openbone-0.1.3.jar --open D:\assets\character.json
+java -Dopenbone.mcp.port=39872 -jar target/openbone-0.2.1.jar
 ```
 
-`openbone.mcp.port=0` selects a free port. If the token is omitted, one is generated automatically and shown in the connection information window. Never commit the actual token to version control or logs.
+`openbone.mcp.port=0` (or `OPENBONE_MCP_PORT=0`) explicitly opts into an ephemeral port for isolated tests; it cannot be saved as the user's port. Saved tokens are stable and never automatically rotated.
 
-The service listens only on `127.0.0.1/mcp` and validates the Bearer token, Host, and Origin. This version supports the MCP tool subsets for `2025-11-25`, `2025-06-18`, and `2025-03-26`; other versions negotiate to `2025-11-25` during initialization. Sessionless Streamable HTTP POST returns JSON, while GET and DELETE return 405; SSE, stdio, subscriptions, remote hosting, and model inference are not provided yet.
+Settings live in `mcp.json` under the per-user Openbone state directory (normally `%LOCALAPPDATA%/Openbone`), outside installation and projects. On Windows, saved tokens use current-user DPAPI encryption through Windows PowerShell, with private process pipes rather than command-line credentials; no plaintext token is stored in metadata or logs. Saving a nonempty GUI token currently requires Windows; other platforms can still use `OPENBONE_MCP_TOKEN`. The UI performs credential and disk operations in background workers, and starts/stops the editor service on Swing EDT. Decryption failure is reported and never silently falls back to unauthenticated startup.
+
+The service listens only on `127.0.0.1/mcp` and validates Host and Origin, plus the Bearer token only when explicitly configured. This version supports the MCP tool subsets for `2025-11-25`, `2025-06-18`, and `2025-03-26`; other versions negotiate to `2025-11-25` during initialization. Sessionless Streamable HTTP POST returns JSON, while GET and DELETE return 405; SSE, stdio, subscriptions, remote hosting, and model inference are not provided yet.
 
 POST requests must carry `Content-Type: application/json` and `Accept: application/json, text/event-stream`, and after initialization must send the negotiated `MCP-Protocol-Version`. Tool calls against the same service are processed in order.
 
@@ -128,7 +128,7 @@ mvn -Dtest=McpDesktopTest -Dopenbone.verifyGl=true test
 mvn test
 ```
 
-Protocol tests cover authentication, origin, negotiation, tool discovery, notifications not performing writes, strict parameters, and request body limits. Business tests cover sampled values, stable IDs, failure atomicity, revision conflicts, duplicate requests, serialization round trips, and history recovery. The actual desktop test edits a temporary project over HTTP, captures GL images at three times, verifies decal pixels and intermediate poses, then undoes and checks that the source project was not rewritten. Images are written to `target/mcp-desktop/`. The default test run skips this graphical test.
+Protocol and settings tests cover stable ports, explicit overrides, encrypted credential persistence, authentication, origin, negotiation, tool discovery, notifications not performing writes, strict parameters, and request body limits. Business tests cover sampled values, stable IDs, failure atomicity, revision conflicts, duplicate requests, serialization round trips, and history recovery. The actual desktop test edits a temporary project over HTTP, captures GL images at three times, verifies decal pixels and intermediate poses, then undoes and checks that the source project was not rewritten. Images are written to `target/mcp-desktop/`. The default test run skips this graphical test.
 
 The optional official Python SDK integration uses `scripts/mcp_sdk_smoke.py` and is started by the desktop test only against a temporary project. The SDK is a test dependency and does not enter the release JAR. This run used official SDK 1.30.0 to verify initialization, tool discovery, project queries, edit retries, PNG previews, and undo:
 
@@ -138,3 +138,5 @@ mvn -Dtest=McpDesktopTest -Dopenbone.verifyGl=true -Dopenbone.mcp.sdkPython=<abs
 ```
 
 Use `-Dopenbone.mcp.sdkPath=<dependency directory>` to override the default SDK directory. Do not run the write integration script directly against a user's production project.
+
+The graphical control-window regression is `mvn -Dtest=McpControlDesktopTest -Dopenbone.verifyGl=true test` on Windows. It checks real HTTP authentication, start/stop, stable restart, masked credentials, persisted automatic startup, disabling automatic startup, and editor shutdown; a credential-free UI capture is written to `target/mcp-desktop/control-window.png`.

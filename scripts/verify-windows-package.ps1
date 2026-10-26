@@ -13,7 +13,9 @@ foreach ($row in Get-Content -LiteralPath (Join-Path $dist "$baseName.sha256")) 
         throw "Release checksum mismatch: $name"
     }
 }
-$work = Join-Path $root ('target/windows-smoke/中文 path ' + [guid]::NewGuid().ToString('N'))
+# Georgian is outside both Western and Chinese ANSI code pages, so this also
+# catches launcher encoding regressions on developer machines with Chinese Windows.
+$work = Join-Path $root ('target/windows-smoke/中文 ქართული path ' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $dist "$baseName-portable.zip"), $work)
@@ -23,8 +25,14 @@ $saved = @{}
 foreach ($name in $environmentNames) { $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 function Assert-Launcher([string]$Directory) {
     $cli = Join-Path $Directory 'Openbone-cli.exe'
-    $actual = & $cli --version
-    if ($LASTEXITCODE -ne 0 -or "$actual".Trim() -ne "Openbone $version") { throw "Version check failed: $actual" }
+    foreach ($relative in @('runtime/bin/java.dll', 'runtime/bin/jli.dll', 'runtime/bin/server/jvm.dll')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Directory $relative))) { throw "Missing bundled runtime file: $Directory/$relative" }
+    }
+    $actual = (& $cli --version 2>&1) -join "`n"
+    $versionExitCode = $LASTEXITCODE
+    if ($versionExitCode -ne 0 -or $actual.Trim() -ne "Openbone $version") {
+        throw "Version check failed for $cli (exit $versionExitCode): $actual"
+    }
     $environment = (& $cli --environment) -join "`n"
     if ($LASTEXITCODE -ne 0) { throw 'Environment diagnostics failed.' }
     $runtimePath = [IO.Path]::GetFullPath(($environment | ConvertFrom-Json).javaHome).TrimEnd('\')

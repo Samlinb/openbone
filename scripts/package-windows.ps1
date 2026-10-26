@@ -3,6 +3,7 @@ param(
     [string]$JdkHome = $env:JAVA_HOME,
     [string]$Maven = 'mvn',
     [string]$RuntimeHome,
+    [string]$ManifestTool,
     [switch]$SkipBuild
 )
 $ErrorActionPreference = 'Stop'
@@ -15,6 +16,21 @@ $jpackage = Join-Path $JdkHome 'bin/jpackage.exe'
 if (-not (Test-Path -LiteralPath $jpackage)) { throw 'Packaging requires a Windows JDK 17+ with jpackage.' }
 $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
 if (-not (Test-Path -LiteralPath $csc)) { throw 'The Windows .NET Framework C# compiler is required to build the offline installer.' }
+if (-not $ManifestTool) {
+    $manifestCommand = Get-Command mt.exe -ErrorAction SilentlyContinue
+    if ($manifestCommand) { $ManifestTool = $manifestCommand.Source }
+    else {
+        $sdkBin = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits/10/bin'
+        $ManifestTool = Get-ChildItem -LiteralPath $sdkBin -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^10\.\d+\.\d+\.\d+$' } |
+            Sort-Object { [version]$_.Name } -Descending |
+            ForEach-Object { Join-Path $_.FullName 'x64/mt.exe' } |
+            Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    }
+}
+if (-not $ManifestTool -or -not (Test-Path -LiteralPath $ManifestTool)) {
+    throw 'Packaging requires Windows SDK mt.exe. Install the Windows SDK or specify -ManifestTool <mt.exe path>.'
+}
 [xml]$pom = Get-Content -LiteralPath (Join-Path $root 'pom.xml')
 $version = [string]$pom.project.version
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Windows release versions must have the form major.minor.patch.' }
@@ -58,6 +74,16 @@ try {
     & $jpackage @packageArgs
     if ($LASTEXITCODE -ne 0) { throw 'jpackage failed.' }
     $image = Join-Path $work 'image/Openbone'
+    # JDK 17 libjli locates java.dll through ANSI APIs. A path outside the system
+    # code page fails before Java starts, so -Dfile.encoding cannot fix it.
+    # Merge into both launchers to preserve jpackage DPI, privileges and OS settings.
+    foreach ($launcher in @('Openbone.exe', 'Openbone-cli.exe')) {
+        $executable = Join-Path $image $launcher
+        (Get-Item -LiteralPath $executable).IsReadOnly = $false
+        & $ManifestTool -nologo "-inputresource:$executable;1" `
+            -manifest (Join-Path $root 'packaging/windows/launcher.manifest') "-outputresource:$executable;1"
+        if ($LASTEXITCODE -ne 0) { throw "UTF-8 launcher manifest merge failed: $launcher" }
+    }
     Copy-Item -LiteralPath (Join-Path $root 'packaging/WINDOWS-README.txt') -Destination (Join-Path $image 'README.txt')
     Copy-Item -LiteralPath (Join-Path $root 'src/main/resources/THIRD_PARTY.txt') -Destination $image
     # Keep the runtime legal notices generated/copied by jpackage, and expose application notices too.

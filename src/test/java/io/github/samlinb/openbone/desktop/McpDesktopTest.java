@@ -34,13 +34,13 @@ class McpDesktopTest {
     @EnabledIfSystemProperty(named="openbone.mcp.sdkPython",matches=".+")
     void officialSdkBuildsSixLegRigFromBlankAndSavesAndLoads() throws Exception {
         String oldState=System.getProperty("openbone.userState"),oldPort=System.getProperty("openbone.mcp.port");
-        System.setProperty("openbone.userState",temp.resolve("scene-state").toString());System.setProperty("openbone.mcp.port","0");
+        System.setProperty("openbone.userState",temp.resolve("scene-state").toString());System.setProperty("openbone.mcp.port","0"); McpConnectionSettings.save(McpConnectionSettings.path(),new McpConnectionSettings.State(39871,true,""));
         Path output=Path.of("target/mcp-ant-validation").toAbsolutePath(), assets=output.resolve("fixtures");Files.createDirectories(assets);
         createFixture(assets.resolve("body.png"),new java.awt.Color(75,38,22));
         createFixture(assets.resolve("head.png"),new java.awt.Color(105,52,28));
         createFixture(assets.resolve("segment.png"),new java.awt.Color(62,29,18));
         try {
-            edt(()->{frame=new EditorFrame(null);frame.setSize(1200,850);frame.showEditor();url=((EditorMcpServer)field("mcpServer")).url();token=(String)field("mcpToken");return null;});
+            edt(()->{frame=new EditorFrame(null);frame.setSize(1200,850);frame.showEditor();return null;}); awaitMcpStarted(); edt(()->{url=((EditorMcpServer)field("mcpServer")).url();token=(String)field("mcpToken");return null;});
             var process=new ProcessBuilder(System.getProperty("openbone.mcp.sdkPython"),"scripts/mcp_scene_smoke.py").redirectErrorStream(true);
             process.environment().put("OPENBONE_MCP_TEST_URL",url);process.environment().put("OPENBONE_MCP_TEST_TOKEN",token);
             process.environment().put("OPENBONE_MCP_TEST_ALLOW_EDITS","disposable-fixture");process.environment().put("OPENBONE_MCP_TEST_OUTPUT",output.toString());process.environment().put("OPENBONE_MCP_TEST_ASSETS",assets.toString());
@@ -65,7 +65,7 @@ class McpDesktopTest {
 
     @Test void currentProjectKeyframesGlPreviewUndoAndShutdown() throws Exception {
         String oldState = System.getProperty("openbone.userState"), oldPort = System.getProperty("openbone.mcp.port");
-        System.setProperty("openbone.userState", temp.resolve("state").toString()); System.setProperty("openbone.mcp.port", "0");
+        System.setProperty("openbone.userState", temp.resolve("state").toString()); System.setProperty("openbone.mcp.port", "0"); McpConnectionSettings.save(McpConnectionSettings.path(),new McpConnectionSettings.State(39871,true,""));
         EntityId bone = EntityId.create(), slot = EntityId.create(), attachment = EntityId.create(), clip = EntityId.create();
         var texture = new BufferedImage(48, 24, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < 24; y++) for (int x = 0; x < 48; x++) texture.setRGB(x, y, y < 12 ? 0xff22dd44 : 0xffdd2244);
@@ -79,6 +79,10 @@ class McpDesktopTest {
         try {
             edt(() -> {
                 frame = new EditorFrame(project); frame.setSize(1200, 850); frame.showEditor();
+                return null;
+            });
+            awaitMcpStarted();
+            edt(() -> {
                 url = ((EditorMcpServer) field("mcpServer")).url(); token = (String) field("mcpToken"); return null;
             });
             var initialized = rpc("initialize", Map.of("protocolVersion", "2025-11-25", "capabilities", Map.of(), "clientInfo", Map.of("name", "desktop-test", "version", "1")));
@@ -141,6 +145,14 @@ class McpDesktopTest {
             restore("openbone.userState", oldState); restore("openbone.mcp.port", oldPort);
         }
     }
+    void awaitMcpStarted() throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (System.nanoTime() < deadline) {
+            if (edt(() -> field("mcpServer") != null)) return;
+            Thread.sleep(40);
+        }
+        fail("MCP automatic startup timed out");
+    }
     void restore(String key, String value) { if (value == null) System.clearProperty(key); else System.setProperty(key, value); }
     Object field(String name) throws Exception { var f = EditorFrame.class.getDeclaredField(name); f.setAccessible(true); return f.get(frame); }
     void invoke(String name) throws Exception { var m = EditorFrame.class.getDeclaredMethod(name); m.setAccessible(true); m.invoke(frame); }
@@ -148,9 +160,10 @@ class McpDesktopTest {
     JsonNode rpc(String method, Object params) throws Exception {
         var body = json.createObjectNode().put("jsonrpc", "2.0").put("id", ++sequence).put("method", method); body.set("params", json.valueToTree(params));
         var request = HttpRequest.newBuilder(URI.create(url)).timeout(java.time.Duration.ofSeconds(20)).header("Content-Type", "application/json")
-                .header("Accept", "application/json, text/event-stream").header("Authorization", "Bearer " + token)
-                .POST(HttpRequest.BodyPublishers.ofString(body.toString())).build();
-        var response = http.send(request, HttpResponse.BodyHandlers.ofString()); assertEquals(200, response.statusCode()); return json.readTree(response.body());
+                .header("Accept", "application/json, text/event-stream");
+        if (!token.isEmpty()) request.header("Authorization", "Bearer " + token);
+        var message = request.POST(HttpRequest.BodyPublishers.ofString(body.toString())).build();
+        var response = http.send(message, HttpResponse.BodyHandlers.ofString()); assertEquals(200, response.statusCode()); return json.readTree(response.body());
     }
     JsonNode call(String tool, Object args) throws Exception {
         var response = rpc("tools/call", Map.of("name", tool, "arguments", args)); assertFalse(response.has("error"), response.toString());

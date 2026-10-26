@@ -19,7 +19,8 @@ import httpx
 async def main():
     if os.environ.get("OPENBONE_MCP_TEST_ALLOW_EDITS") != "disposable-fixture":
         raise RuntimeError("Run only through McpDesktopTest with its disposable fixture")
-    headers = {"Authorization": "Bearer " + os.environ["OPENBONE_MCP_TEST_TOKEN"]}
+    token = os.environ.get("OPENBONE_MCP_TEST_TOKEN", "")
+    headers = {"Authorization": "Bearer " + token} if token else {}
     async with (
         httpx.AsyncClient(headers=headers, timeout=20, trust_env=False) as client,
         streamable_http_client(os.environ["OPENBONE_MCP_TEST_URL"], http_client=client) as (read, write, _),

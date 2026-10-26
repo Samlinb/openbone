@@ -29,7 +29,8 @@ async def main():
     output = Path(os.environ["OPENBONE_MCP_TEST_OUTPUT"]).resolve()
     assets = Path(os.environ["OPENBONE_MCP_TEST_ASSETS"]).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    headers = {"Authorization": "Bearer " + os.environ["OPENBONE_MCP_TEST_TOKEN"]}
+    token = os.environ.get("OPENBONE_MCP_TEST_TOKEN", "")
+    headers = {"Authorization": "Bearer " + token} if token else {}
     async with (
         httpx.AsyncClient(headers=headers, timeout=30, trust_env=False) as client,
         streamable_http_client(os.environ["OPENBONE_MCP_TEST_URL"], http_client=client) as (read, write, _),

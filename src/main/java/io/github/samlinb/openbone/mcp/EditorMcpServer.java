@@ -29,10 +29,11 @@ public final class EditorMcpServer implements AutoCloseable {
     private final byte[] authorization;
 
     public EditorMcpServer(int port, String token, EditorMcpTools tools) throws IOException {
-        if (token == null || !token.matches("[A-Za-z0-9_-]{32,256}"))
+        if (token != null && !token.isEmpty() && !token.matches("[A-Za-z0-9_-]{32,256}"))
             throw new IllegalArgumentException("MCP token must contain 32 to 256 ASCII letters, digits, underscores or hyphens.");
         this.tools = Objects.requireNonNull(tools);
-        authorization = ("Bearer " + token).getBytes(StandardCharsets.UTF_8);
+        // Local clients are trusted by default; only an explicitly supplied token enables authentication.
+        authorization = token == null || token.isEmpty() ? null : ("Bearer " + token).getBytes(StandardCharsets.UTF_8);
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 16);
         executor = new ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(16), runnable -> {
             var t = new Thread(runnable, "openbone-mcp"); t.setDaemon(true); return t;
@@ -53,7 +54,7 @@ public final class EditorMcpServer implements AutoCloseable {
             String origin = exchange.getRequestHeaders().getFirst("Origin");
             if (origin != null && !Set.of("http://127.0.0.1:" + port, "http://localhost:" + port).contains(origin)) { send(exchange, 403, null); return; }
             byte[] supplied = Objects.toString(exchange.getRequestHeaders().getFirst("Authorization"), "").getBytes(StandardCharsets.UTF_8);
-            if (!MessageDigest.isEqual(authorization, supplied)) {
+            if (authorization != null && !MessageDigest.isEqual(authorization, supplied)) {
                 exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer"); send(exchange, 401, null); return;
             }
             if (!exchange.getRequestMethod().equals("POST")) {
