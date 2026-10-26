@@ -7,6 +7,7 @@ import io.github.samlinb.openbone.core.animation.*;
 import io.github.samlinb.openbone.core.model.*;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
+import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
 import javax.imageio.ImageIO;
@@ -20,7 +21,13 @@ public final class EditorMcpTools {
         void prepare();
         void changed();
         CompletableFuture<Preview> capture(EntityId animation, double time, String revision);
+        default CompletableFuture<Preview> capture(EntityId animation, double time, String revision, CaptureOptions options) { return capture(animation,time,revision); }
+        default ProjectDocument project() { throw new UnsupportedOperationException("Project IO is unavailable for this host"); }
+        default void installProject(ProjectDocument document) { throw new UnsupportedOperationException("Project loading is unavailable for this host"); }
+        default void control(ViewControl control) { throw new UnsupportedOperationException("View control is unavailable for this host"); }
     }
+    public record CaptureOptions(boolean fit, Boolean showBones, Boolean showGrid) {}
+    public record ViewControl(String action, EntityId animation, Double time, Boolean loop, Boolean showBones, Boolean showGrid) {}
     public record Preview(BufferedImage image, Map<String, Object> metadata) {}
     private record Receipt(JsonNode arguments, ObjectNode result) {}
     private static final ObjectMapper JSON = mapper();
@@ -45,14 +52,23 @@ public final class EditorMcpTools {
              "animationId":{"type":"string"},"boneId":{"type":"string"},"expectedRevision":{"type":"string"},
              "offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":200}}
             """, "kind"), true);
-        add(tools, "openbone_apply_edits", "Atomically edit keyframes in one undo step. Seconds; local translation/rotation/shear are offsets from Setup (angles in degrees); scale is a multiplier (1 = Setup). Same channel/time replaces a key and preserves its ID. Read context first. New animations use caller-created UUIDs. Retry with the SAME requestId and arguments.", editSchema(), false);
-        add(tools, "openbone_capture_preview", "Seek the live editor to exact seconds (no frame snapping), pause playback and capture its actual GL viewport as PNG, at most 1024 pixels per side. Includes grid and bone overlays. Requires a visible editor. Repeat at several times to inspect motion. Does not add undo history.", schema("""
-            {"animationId":{"type":"string"},"time":{"type":"number","minimum":0,"maximum":600},"expectedRevision":{"type":"string"}}
+        add(tools, "openbone_apply_edits", "Build and edit the live scene atomically in one undo step. Supports bones/reparent, slots/order, local PNG regions, animations and keyframes. Setup transforms are absolute LOCAL values; keyframe translation/rotation/shear are offsets from Setup (degrees); scale is a multiplier. UUIDs are caller-created. PNGs are validated before publication, linked by absolute path, not copied. curve may be linear, stepped or {kind:bezier,x1,y1,x2,y2} fractions of a segment. Retry with the SAME requestId and arguments.", editSchema(), false);
+        add(tools, "openbone_capture_preview", "Seek exact seconds, pause and capture the real GL viewport as PNG, max 1024 pixels per side. Optional fit frames visible geometry; showBones/showGrid can hide editing overlays. Options persist in the editor. Requires a visible window. Capture multiple times to inspect motion; no undo history.", schema("""
+            {"animationId":{"type":"string"},"time":{"type":"number","minimum":0,"maximum":600},"expectedRevision":{"type":"string"},"fit":{"type":"boolean"},"showBones":{"type":"boolean"},"showGrid":{"type":"boolean"}}
             """, "animationId", "time", "expectedRevision"), false);
         for (String action : List.of("undo", "redo"))
             add(tools, "openbone_" + action, "Perform one " + action + " in the current editor history (including manual edits). Read context first; retry with the same requestId and arguments.", schema("""
                 {"expectedRevision":{"type":"string"},"requestId":{"type":"string","minLength":1,"maxLength":128}}
                 """, "expectedRevision", "requestId"), false);
+        add(tools,"openbone_control_view","Control live playback and camera without editing model/history. action seek requires time; play/seek use animationId or the current animation. frame fits current visible geometry (bones if empty). Configure overlay flags and looping. Uses revision and retry receipt like editing.",schema("""
+            {"action":{"enum":["play","pause","seek","frame","configure"]},"animationId":{"type":"string"},"time":{"type":"number","minimum":0,"maximum":600},"loop":{"type":"boolean"},"showBones":{"type":"boolean"},"showGrid":{"type":"boolean"},"expectedRevision":{"type":"string"},"requestId":{"type":"string"}}
+            ""","action","expectedRevision","requestId"),false);
+        add(tools,"openbone_save_project","Save a captured current project to an absolute .json path, portable by default (copies PNGs via the existing save service). Existing target requires overwrite:true. Preserves live undo history. If manual edits occur during IO, savedRevision identifies the disk snapshot and adopted:false leaves current state dirty. Retry with identical requestId and arguments.",schema("""
+            {"path":{"type":"string"},"portable":{"type":"boolean"},"overwrite":{"type":"boolean"},"expectedRevision":{"type":"string"},"requestId":{"type":"string"}}
+            ""","path","expectedRevision","requestId"),false);
+        add(tools,"openbone_load_project","Load an absolute OpenBone .json project through the existing project service. dirtyPolicy must explicitly be reject or discard; discard authorizes replacing unsaved edits. Validates before replacing current editor. Resets history; failed load preserves current project. Retry with identical requestId and arguments.",schema("""
+            {"path":{"type":"string"},"dirtyPolicy":{"enum":["reject","discard"]},"expectedRevision":{"type":"string"},"requestId":{"type":"string"}}
+            ""","path","dirtyPolicy","expectedRevision","requestId"),false);
         return tools;
     }
 
@@ -66,6 +82,13 @@ public final class EditorMcpTools {
                {"type":"object","additionalProperties":false,"properties":{"op":{"const":"remove_keyframes"},"animationId":{"type":"string"},"keyIds":{"type":"array","minItems":1,"maxItems":500,"items":{"type":"string"}}},"required":["op","animationId","keyIds"]}
              ]}}}
             """, "expectedRevision", "requestId", "edits");
+        var variants=(ArrayNode)s.path("properties").path("edits").path("items").path("oneOf");
+        variants.addAll(SceneMcpEdits.schemas(JSON));
+        try {
+            ((ObjectNode)variants.get(1).path("properties")).set("curve",JSON.readTree("""
+                {"oneOf":[{"enum":["linear","stepped"]},{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"bezier"},"x1":{"type":"number","minimum":0,"maximum":1},"y1":{"type":"number"},"x2":{"type":"number","minimum":0,"maximum":1},"y2":{"type":"number"}},"required":["kind","x1","y1","x2","y2"]}]}
+                """));
+        } catch(Exception impossible) { throw new IllegalStateException(impossible); }
         return s;
     }
 
@@ -99,6 +122,7 @@ public final class EditorMcpTools {
                 case "openbone_query_scene" -> result = success(onEdt(() -> query(args)));
                 case "openbone_capture_preview" -> result = capture(args);
                 case "openbone_apply_edits", "openbone_undo", "openbone_redo" -> result = mutate(name, args);
+                case "openbone_control_view", "openbone_save_project", "openbone_load_project" -> result = serviceOperation(name,args);
                 default -> throw new IllegalArgumentException("Unknown tool: " + name + ". Call tools/list.");
             }
             return result;
@@ -118,6 +142,9 @@ public final class EditorMcpTools {
         var d = h.state().model();
         var data = new LinkedHashMap<String, Object>();
         data.put("revision", h.revision());
+        data.put("version",io.github.samlinb.openbone.EditorApplication.version());
+        data.put("mcpApiVersion",2);
+        data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",true,"cleanPreview",true,"atomicEdits",true));
         data.put("dirty", h.isDirty());
         data.put("busy", h.isPreviewing());
         data.put("selection", h.state().selection().ids().stream().map(EntityId::value).toList());
@@ -162,7 +189,7 @@ public final class EditorMcpTools {
             case "slots" -> { total = d.slots().size(); rows = d.slots().stream().map(JSON::valueToTree); }
             case "attachments" -> {
                 total = d.attachments().size();
-                rows = d.attachments().stream().map(t -> JSON.valueToTree(Map.of("id", t.id().value(), "name", t.name(), "slotId", t.slotId().value(), "type", t.getClass().getSimpleName())));
+                rows = d.attachments().stream().map(t -> JSON.valueToTree(t instanceof RegionAttachment r ? Map.of("id",r.id().value(),"name",r.name(),"slotId",r.slotId().value(),"type","RegionAttachment","source",r.source(),"setup",r.local(),"width",r.width(),"height",r.height()) : Map.of("id",t.id().value(),"name",t.name(),"slotId",t.slotId().value(),"type",t.getClass().getSimpleName())));
             }
             case "constraints" -> { total = d.constraints().size(); rows = d.constraints().stream().map(JSON::valueToTree); }
             default -> throw new IllegalArgumentException("Unknown kind. Use bones, animations, keyframes, slots, attachments or constraints.");
@@ -212,7 +239,7 @@ public final class EditorMcpTools {
         return result;
     }
 
-    private static DocumentSnapshot edit(DocumentSnapshot d, JsonNode e) {
+    private static DocumentSnapshot edit(DocumentSnapshot d, JsonNode e) throws Exception {
         String op = text(e, "op", 32);
         return switch (op) {
             case "create_animation" -> {
@@ -230,10 +257,14 @@ public final class EditorMcpTools {
                 double time = number(e.get("time"), "time", 0, 600);
                 DocumentSnapshot next = AnimationEdits.put(d, clip, bone, channel, time, v);
                 if (e.has("curve")) {
-                    Curve curve = switch (text(e, "curve", 16)) {
-                        case "linear" -> Curve.LINEAR;
-                        case "stepped" -> Curve.STEPPED;
-                        default -> throw new IllegalArgumentException("curve must be linear or stepped.");
+                    Curve curve;
+                    if(e.get("curve").isObject()) {
+                        var c=e.get("curve");fields(c,"kind","x1","y1","x2","y2");
+                        if(!text(c,"kind",16).equals("bezier"))throw new IllegalArgumentException("Curve kind must be bezier");
+                        curve=new Curve(Curve.Kind.BEZIER,number(c.get("x1"),"x1",0,1),number(c.get("y1"),"y1",-1e9,1e9),number(c.get("x2"),"x2",0,1),number(c.get("y2"),"y2",-1e9,1e9));
+                    } else curve = switch (text(e, "curve", 16)) {
+                        case "linear" -> Curve.LINEAR; case "stepped" -> Curve.STEPPED;
+                        default -> throw new IllegalArgumentException("curve must be linear, stepped or a bezier object.");
                     };
                     var key = next.animation(clip).timelines().stream().filter(t -> t.boneId().equals(bone) && t.channel() == channel)
                             .flatMap(t -> t.keys().stream()).filter(k -> k.time() == time).findFirst().orElseThrow();
@@ -251,15 +282,16 @@ public final class EditorMcpTools {
                 }
                 yield AnimationEdits.remove(d, id(e, "animationId"), ids);
             }
-            default -> throw new IllegalArgumentException("Unknown edit op: " + op);
+            default -> SceneMcpEdits.apply(d,e,op);
         };
     }
 
     private ObjectNode capture(JsonNode a) throws Exception {
-        fields(a, "animationId", "time", "expectedRevision");
+        fields(a, "animationId", "time", "expectedRevision","fit","showBones","showGrid");
         EntityId clip = id(a, "animationId"); double time = number(a.get("time"), "time", 0, 600);
         String revision = text(a, "expectedRevision", 128);
-        var future = onEdt(() -> { host.prepare(); checkRevision(revision); host.history().requireIdle(); return host.capture(clip, time, revision); });
+        var options=new CaptureOptions(SceneMcpEdits.bool(a,"fit",false),optionalBool(a,"showBones"),optionalBool(a,"showGrid"));
+        var future = onEdt(() -> { host.prepare(); checkRevision(revision); host.history().requireIdle(); return host.capture(clip, time, revision,options); });
         Preview preview;
         try { preview = future.get(10, TimeUnit.SECONDS); }
         finally { future.cancel(false); }
@@ -286,6 +318,54 @@ public final class EditorMcpTools {
 
     private void checkRevision(String revision) {
         if (!host.history().revision().equals(revision)) throw new IllegalStateException("REVISION_CONFLICT: project changed. Read context and query scene again, then use a new requestId.");
+    }
+    private static Boolean optionalBool(JsonNode a,String key) {return a.has(key)?SceneMcpEdits.bool(a,key,false):null;}
+
+    private ObjectNode serviceOperation(String name,JsonNode a) throws Exception {
+        switch(name) {
+            case "openbone_control_view" -> fields(a,"action","animationId","time","loop","showBones","showGrid","expectedRevision","requestId");
+            case "openbone_save_project" -> fields(a,"path","portable","overwrite","expectedRevision","requestId");
+            case "openbone_load_project" -> fields(a,"path","dirtyPolicy","expectedRevision","requestId");
+            default -> throw new IllegalArgumentException("Unknown service operation");
+        }
+        String key=name+":"+text(a,"requestId",128), revision=text(a,"expectedRevision",128);
+        Receipt receipt=receipts.get(key);
+        if(receipt!=null) {if(!receipt.arguments().equals(a))throw new IllegalArgumentException("requestId already used with different arguments");return receipt.result().deepCopy();}
+        ObjectNode result;
+        if(name.equals("openbone_control_view")) {
+            String action=text(a,"action",32);
+            if(!Set.of("play","pause","seek","frame","configure").contains(action))throw new IllegalArgumentException("Invalid view action");
+            if(action.equals("seek")&&!a.has("time"))throw new IllegalArgumentException("seek requires time");
+            var control=new ViewControl(action,a.has("animationId")?id(a,"animationId"):null,a.has("time")?number(a.get("time"),"time",0,600):null,optionalBool(a,"loop"),optionalBool(a,"showBones"),optionalBool(a,"showGrid"));
+            result=onEdt(()->{host.prepare();checkRevision(revision);host.control(control);return success(context());});
+        } else {
+            Path path=SceneMcpEdits.absolutePath(a,"path");io.github.samlinb.openbone.io.ProjectCodec.requireProjectPath(path);
+            boolean loading=name.equals("openbone_load_project");
+            String policy=loading?text(a,"dirtyPolicy",16):"reject";
+            if(loading&&!Set.of("reject","discard").contains(policy))throw new IllegalArgumentException("dirtyPolicy must be reject or discard");
+            DocumentSnapshot snapshot=onEdt(()->{
+                host.prepare();checkRevision(revision);
+                if(loading&&host.history().isDirty()&&!policy.equals("discard"))throw new IllegalStateException("DIRTY_PROJECT: save first or explicitly use dirtyPolicy:discard");
+                return host.history().state().model();
+            });
+            ProjectDocument prepared=new ProjectDocument(loading?DocumentSnapshot.EMPTY:snapshot);
+            if(loading) {
+                prepared.openResolved(path);
+                result=onEdt(()->{host.prepare();checkRevision(revision);host.installProject(prepared);return success(context());});
+            } else {
+                boolean overwrite=SceneMcpEdits.bool(a,"overwrite",false), portable=SceneMcpEdits.bool(a,"portable",true);
+                if(Files.exists(path)&&!overwrite)throw new IllegalStateException("TARGET_EXISTS: explicitly set overwrite:true or choose a new path");
+                if(portable)prepared.savePortable(path);else prepared.save(path);
+                result=onEdt(()->{
+                    boolean adopted=host.history().revision().equals(revision)&&!host.history().isPreviewing();
+                    if(adopted) {host.project().acceptSavedCopy(prepared);host.changed();}
+                    var state=new LinkedHashMap<>(context());state.put("savedPath",path.toString());state.put("savedRevision",revision);state.put("adopted",adopted);return success(state);
+                });
+            }
+        }
+        receipts.put(key,new Receipt(a.deepCopy(),result.deepCopy()));
+        if(receipts.size()>128)receipts.remove(receipts.keySet().iterator().next());
+        return result;
     }
     private static <T> T onEdt(Callable<T> work) throws Exception {
         var task = new FutureTask<T>(work); SwingUtilities.invokeLater(task);

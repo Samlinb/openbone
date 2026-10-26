@@ -102,6 +102,13 @@ public final class EditorViewport extends ApplicationAdapter {
     private int pixelWidth, pixelHeight;
     private final FrameTelemetry telemetry = new FrameTelemetry();
     private long renders, createdAt, firstRenderAt;
+    private boolean showBones=true, showGrid=true;
+
+    public void displayOptions(Boolean bones,Boolean grid) {
+        requireEdt(); if(bones!=null)showBones=bones;if(grid!=null)showGrid=grid;
+    }
+    public boolean showBones() {return showBones;}
+    public boolean showGrid() {return showGrid;}
     private record Capture(Runnable prepare, java.util.concurrent.CompletableFuture<java.awt.image.BufferedImage> result) {}
     private final Deque<Capture> captures = new ArrayDeque<>();
 
@@ -592,6 +599,7 @@ public final class EditorViewport extends ApplicationAdapter {
         var projection = new Matrix4().setToOrtho(0, w, h, 0, -1, 1);
         shapes.setProjectionMatrix(projection);
         batch.setProjectionMatrix(projection);
+        if(showGrid) {
         shapes.begin(ShapeRenderer.ShapeType.Line);
         shapes.setColor(.18f, .22f, .26f, 1);
         double step = 50 * camera.zoom();
@@ -609,6 +617,7 @@ public final class EditorViewport extends ApplicationAdapter {
         line(new Vec2(zero.x(), 0), new Vec2(zero.x(), h));
         line(new Vec2(0, zero.y()), new Vec2(w, zero.y()));
         shapes.end();
+        }
         var d = model();
         var pose = host.evaluatedPose();
         Set<java.nio.file.Path> used = new HashSet<>();
@@ -632,6 +641,7 @@ public final class EditorViewport extends ApplicationAdapter {
             if (a.source() != null)
                 used.add(assets.resolve(a.source()));
         assets.retain(used);
+        if(showBones) {
         EntityId selected = selected();
         shapes.begin(ShapeRenderer.ShapeType.Line);
         for (var b : d.bones()) {
@@ -757,6 +767,7 @@ public final class EditorViewport extends ApplicationAdapter {
             line(press, createEnd);
         }
         shapes.end();
+        }
         if (capture != null) {
             try {
                 if ((long) pw * ph > 16_000_000) throw new IllegalStateException("Viewport too large for a preview.");

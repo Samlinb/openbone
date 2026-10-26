@@ -30,6 +30,39 @@ class McpDesktopTest {
     String url, token;
     int sequence;
 
+    @Test
+    @EnabledIfSystemProperty(named="openbone.mcp.sdkPython",matches=".+")
+    void officialSdkBuildsSixLegRigFromBlankAndSavesAndLoads() throws Exception {
+        String oldState=System.getProperty("openbone.userState"),oldPort=System.getProperty("openbone.mcp.port");
+        System.setProperty("openbone.userState",temp.resolve("scene-state").toString());System.setProperty("openbone.mcp.port","0");
+        Path output=Path.of("target/mcp-ant-validation").toAbsolutePath(), assets=output.resolve("fixtures");Files.createDirectories(assets);
+        createFixture(assets.resolve("body.png"),new java.awt.Color(75,38,22));
+        createFixture(assets.resolve("head.png"),new java.awt.Color(105,52,28));
+        createFixture(assets.resolve("segment.png"),new java.awt.Color(62,29,18));
+        try {
+            edt(()->{frame=new EditorFrame(null);frame.setSize(1200,850);frame.showEditor();url=((EditorMcpServer)field("mcpServer")).url();token=(String)field("mcpToken");return null;});
+            var process=new ProcessBuilder(System.getProperty("openbone.mcp.sdkPython"),"scripts/mcp_scene_smoke.py").redirectErrorStream(true);
+            process.environment().put("OPENBONE_MCP_TEST_URL",url);process.environment().put("OPENBONE_MCP_TEST_TOKEN",token);
+            process.environment().put("OPENBONE_MCP_TEST_ALLOW_EDITS","disposable-fixture");process.environment().put("OPENBONE_MCP_TEST_OUTPUT",output.toString());process.environment().put("OPENBONE_MCP_TEST_ASSETS",assets.toString());
+            process.environment().put("OPENBONE_MCP_SDK_PATH",Path.of(System.getProperty("openbone.mcp.sdkPath","target/mcp-client-deps")).toAbsolutePath().toString());
+            Path log=output.resolve("sdk-scene.log");process.redirectOutput(log.toFile());var running=process.start();
+            if(!running.waitFor(55,TimeUnit.SECONDS)){running.destroyForcibly();fail("Scene MCP test timed out");}
+            assertEquals(0,running.exitValue(),Files.readString(log));
+            assertTrue(Files.readString(log).contains("Official MCP scene smoke passed"));
+            assertEquals(18,edt(()->frame.history().state().model().bones().size()));
+            assertFalse(edt(()->frame.history().isDirty()));
+        } finally {
+            if(frame!=null)edt(()->{if(frame.isDisplayable()){frame.history().markSaved();invoke("closeRequested");}return null;});
+            restore("openbone.userState",oldState);restore("openbone.mcp.port",oldPort);
+        }
+    }
+
+    private static void createFixture(Path path,java.awt.Color color) throws Exception {
+        var image=new BufferedImage(64,64,BufferedImage.TYPE_INT_ARGB);var g=image.createGraphics();
+        g.setRenderingHint(java.awt.RenderingHints.KEY_ANTIALIASING,java.awt.RenderingHints.VALUE_ANTIALIAS_ON);g.setColor(color);g.fillOval(1,1,62,62);
+        g.setColor(color.brighter());g.fillOval(15,7,15,28);g.dispose();ImageIO.write(image,"PNG",path.toFile());
+    }
+
     @Test void currentProjectKeyframesGlPreviewUndoAndShutdown() throws Exception {
         String oldState = System.getProperty("openbone.userState"), oldPort = System.getProperty("openbone.mcp.port");
         System.setProperty("openbone.userState", temp.resolve("state").toString()); System.setProperty("openbone.mcp.port", "0");

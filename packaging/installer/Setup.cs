@@ -39,14 +39,17 @@ class Setup {
  [STAThread] static int Main(string[] args){try{
   if(args.Length==2&&(args[0]=="--install"||args[0]=="--uninstall")){if(args[0]=="--install")Install(args[1]);else Uninstall(args[1]);return 0;}
   if(args.Length!=0)return 2;
-  Application.EnableVisualStyles();var form=new Form{Text="Openbone P9 安装 / 卸载",Width=720,Height=245,StartPosition=FormStartPosition.CenterScreen};
-  var path=new TextBox{Left=24,Top=60,Width=550,Text=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","Openbone-P9")};
-  var label=new Label{Left=24,Top=20,Width=650,Height=32,Text="离线安装，内含 Java 17。选择专用目录；工程与恢复数据将保留。"};
+  Application.EnableVisualStyles();var form=new Form{Text="Openbone 安装 / 卸载",Width=720,Height=245,StartPosition=FormStartPosition.CenterScreen};
+  var path=new TextBox{Left=24,Top=60,Width=550,Text=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","Openbone")};
+  var label=new Label{Left=24,Top=20,Width=650,Height=32,Text="离线安装，内含 Java 运行时和依赖。选择专用目录；工程与恢复数据将保留。"};
   var browse=new Button{Text="浏览…",Left=585,Top=58,Width=90};browse.Click+=(s,e)=>{using(var d=new FolderBrowserDialog()){if(d.ShowDialog(form)==DialogResult.OK)path.Text=d.SelectedPath;}};
   var install=new Button{Text="安装 / 重装",Left=24,Top=110,Width=145};var uninstall=new Button{Text="卸载",Left=185,Top=110,Width=100};var close=new Button{Text="关闭",Left=570,Top=155,Width=100};var status=new Label{Left=24,Top=155,Width=530,Height=40};
-  install.Click+=(s,e)=>{try{Install(path.Text);status.Text="安装完成。双击目标目录中的 Openbone.exe 启动。";}catch(Exception ex){MessageBox.Show(form,ex.Message,"安装失败");}};
-  uninstall.Click+=(s,e)=>{if(MessageBox.Show(form,"删除已安装的产品文件？用户工程和修改过的文件将保留。","卸载",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;try{Uninstall(path.Text);status.Text="卸载完成；用户文件已保留。";}catch(Exception ex){MessageBox.Show(form,ex.Message,"卸载未完成");}};
-  close.Click+=(s,e)=>form.Close();form.Controls.AddRange(new Control[]{label,path,browse,install,uninstall,close,status});Application.Run(form);return 0;
+  var launch=new Button{Text="启动 Openbone",Left=305,Top=110,Width=145,Enabled=false};
+  path.TextChanged+=(s,e)=>launch.Enabled=false;
+  install.Click+=(s,e)=>{try{Install(path.Text);launch.Enabled=true;status.Text="安装完成。点击“启动 Openbone”即可使用。";}catch(Exception ex){MessageBox.Show(form,ex.Message,"安装失败");}};
+  launch.Click+=(s,e)=>{try{string folder=Root(path.Text);System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo{FileName=Path.Combine(folder,"Openbone.exe"),WorkingDirectory=folder,UseShellExecute=true});}catch(Exception ex){MessageBox.Show(form,ex.Message,"启动失败");}};
+  uninstall.Click+=(s,e)=>{if(MessageBox.Show(form,"删除已安装的产品文件？用户工程和修改过的文件将保留。","卸载",MessageBoxButtons.YesNo)!=DialogResult.Yes)return;try{Uninstall(path.Text);launch.Enabled=false;status.Text="卸载完成；用户文件已保留。";}catch(Exception ex){MessageBox.Show(form,ex.Message,"卸载未完成");}};
+  close.Click+=(s,e)=>form.Close();form.Controls.AddRange(new Control[]{label,path,browse,install,uninstall,launch,close,status});Application.Run(form);return 0;
  }catch(Exception e){try{File.WriteAllText(Path.Combine(Path.GetTempPath(),"Openbone-setup-error-"+System.Diagnostics.Process.GetCurrentProcess().Id+".txt"),e.ToString());}catch{}return 1;}}
 }
 

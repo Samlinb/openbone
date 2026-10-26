@@ -10,12 +10,14 @@ import io.github.samlinb.openbone.io.ProjectCodec;
 import java.awt.image.BufferedImage;
 import java.net.URI;
 import java.net.http.*;
+import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 class EditorMcpServerTest {
@@ -26,15 +28,20 @@ class EditorMcpServerTest {
     final TestHost host = new TestHost();
     EditorMcpServer server;
     int sequence;
+    @TempDir Path temp;
 
     static final class TestHost implements EditorMcpTools.Host {
-        CommandHistory history = new CommandHistory(new DocumentSnapshot(List.of(new Bone(BONE, "root", null, new Transform(10, 20, 30, 2, 3), 60)), List.of(), List.of(), List.of()));
+        ProjectDocument project = new ProjectDocument(new DocumentSnapshot(List.of(new Bone(BONE, "root", null, new Transform(10, 20, 30, 2, 3), 60)), List.of(), List.of(), List.of()));
+        CommandHistory history = project.history();
         int refreshes;
+        Runnable prepareHook;
         void edt() { assertTrue(SwingUtilities.isEventDispatchThread()); }
         public CommandHistory history() { edt(); return history; }
         public Map<String, Object> context() { edt(); return Map.of("mode", "setup"); }
-        public void prepare() { edt(); history.requireIdle(); }
+        public void prepare() { edt(); history.requireIdle(); if(prepareHook!=null)prepareHook.run(); }
         public void changed() { edt(); refreshes++; }
+        public ProjectDocument project() {edt();return project;}
+        public void installProject(ProjectDocument next) {edt();project=next;history=next.history();refreshes++;}
         public CompletableFuture<EditorMcpTools.Preview> capture(EntityId animation, double time, String revision) {
             edt(); history.state().model().animation(animation);
             var image = new BufferedImage(12, 8, BufferedImage.TYPE_INT_RGB); image.setRGB(3, 2, 0xff00ff00);
@@ -85,7 +92,7 @@ class EditorMcpServerTest {
         }
         var notification = JSON.createObjectNode().put("jsonrpc", "2.0").put("method", "notifications/initialized");
         assertEquals(202, post(notification).statusCode());
-        var tools = rpc("tools/list", Map.of()).path("result").path("tools"); assertEquals(6, tools.size());
+        var tools = rpc("tools/list", Map.of()).path("result").path("tools"); assertEquals(9, tools.size());
         for (var tool : tools) {
             assertEquals("object", tool.path("inputSchema").path("type").asText());
             assertFalse(tool.path("inputSchema").path("additionalProperties").asBoolean());
@@ -193,5 +200,84 @@ class EditorMcpServerTest {
         var n = JSON.createObjectNode().put("jsonrpc", "2.0").put("method", "tools/call");
         n.set("params", JSON.valueToTree(Map.of("name", "openbone_apply_edits", "arguments", mutation(before, create()))));
         assertEquals(202, post(n).statusCode()); assertEquals(before, revision());
+    }
+
+    Map<String,Object> setup(double x,double y,double angle) {return Map.of("x",x,"y",y,"rotation",angle,"scaleX",1,"scaleY",1);}
+    Path png() throws Exception {Path path=temp.resolve("part.png");ImageIO.write(new BufferedImage(20,10,BufferedImage.TYPE_INT_ARGB),"PNG",path.toFile());return path;}
+    Map<String,Object> bone(EntityId id,EntityId parent) {
+        var op=new HashMap<String,Object>();op.put("op","create_bone");op.put("boneId",id.value());op.put("name",id.value());op.put("parentId",parent==null?null:parent.value());op.put("setup",setup(40,10,0));op.put("length",30);return op;
+    }
+
+    @Test void sceneConstructionEditingReparentOrderAndUndoShareTheLiveHistory() throws Exception {
+        var child=EntityId.create();var slot=EntityId.create();var region=EntityId.create();var otherSlot=EntityId.create();
+        Path png=png();String before=revision();
+        var add=mutation(before,bone(child,BONE),Map.of("op","create_slot","slotId",slot.value(),"name","body","boneId",child.value()),
+                Map.of("op","create_region","attachmentId",region.value(),"slotId",slot.value(),"name","part","pngPath",png.toString()),
+                Map.of("op","create_slot","slotId",otherSlot.value(),"name","other","boneId",BONE.value()));
+        var built=ok("openbone_apply_edits",add);assertEquals(2,built.path("counts").path("bones").asInt());assertEquals(1,built.path("undoCount").asInt());
+        assertEquals(built,ok("openbone_apply_edits",add));
+        var regions=ok("openbone_query_scene",Map.of("kind","attachments")).path("items");assertEquals(20,regions.get(0).path("width").asDouble());
+        var origin=edt(()->host.history.state().model().evaluateWorld().bones().get(child).origin());
+        var reparent=new HashMap<String,Object>();reparent.put("op","reparent_bone");reparent.put("boneId",child.value());reparent.put("parentId",null);reparent.put("policy","keep_world");
+        ok("openbone_apply_edits",mutation(revision(),reparent,Map.of("op","edit_bone","boneId",child.value(),"name","arm","length",80),
+                Map.of("op","edit_region","attachmentId",region.value(),"width",90,"height",40,"setup",setup(20,0,45)),
+                Map.of("op","set_slot_order","slotIds",List.of(otherSlot.value(),slot.value()))));
+        edt(()->{var model=host.history.state().model();assertEquals(origin,model.evaluateWorld().bones().get(child).origin());assertEquals(otherSlot,model.slots().get(0).id());assertEquals("arm",model.bone(child).name());assertEquals(90,((RegionAttachment)model.attachment(region)).width());return null;});
+        ok("openbone_undo",Map.of("requestId","undo-scene-edits","expectedRevision",revision()));
+        ok("openbone_undo",Map.of("requestId","undo-scene-create","expectedRevision",revision()));
+        assertEquals(0,ok("openbone_get_context",Map.of()).path("counts").path("slots").asInt());
+        assertFalse(ok("openbone_get_context",Map.of()).path("dirty").asBoolean());
+        ok("openbone_redo",Map.of("requestId","redo-scene-create","expectedRevision",revision()));
+        assertEquals(2,ok("openbone_get_context",Map.of()).path("counts").path("slots").asInt());
+    }
+
+    @Test void missingRelativeAndCorruptPngAndInvalidTopologyLeaveNoPartialScene() throws Exception {
+        var child=EntityId.create();var slot=EntityId.create();var region=EntityId.create();
+        Path corrupt=temp.resolve("bad.png");Files.writeString(corrupt,"not a png");
+        String before=revision();
+        for(String source:List.of("relative.png",temp.resolve("missing.png").toString(),corrupt.toString())) {
+            var failed=call("openbone_apply_edits",mutation(before,bone(child,BONE),Map.of("op","create_slot","slotId",slot.value(),"name","part","boneId",child.value()),
+                    Map.of("op","create_region","attachmentId",region.value(),"slotId",slot.value(),"name","part","pngPath",source)));
+            assertTrue(failed.path("isError").asBoolean());assertEquals(before,revision());
+        }
+        assertTrue(call("openbone_apply_edits",mutation(before,bone(child,BONE),Map.of("op","reparent_bone","boneId",BONE.value(),"parentId",child.value(),"policy","keep_local"))).path("isError").asBoolean());
+        assertEquals(before,revision());assertEquals(1,ok("openbone_get_context",Map.of()).path("counts").path("bones").asInt());
+    }
+
+    @Test void bezierIsSmoothAndInvalidHandlesAreAtomic() throws Exception {
+        var first=new HashMap<>(key(0,"ROTATE",0));first.put("curve",Map.of("kind","bezier","x1",.5,"y1",0,"x2",1,"y2",1));
+        ok("openbone_apply_edits",mutation(revision(),create(),first,key(1,"ROTATE",40)));
+        double sampled=edt(()->AnimationSampler.pose(host.history.state().model(),CLIP,.5,false).get(BONE).rotation());
+        assertTrue(sampled>30&&sampled<50,"Ease-in midpoint must lag the linear midpoint");
+        var bad=new HashMap<>(first);bad.put("curve",Map.of("kind","bezier","x1",2,"y1",0,"x2",1,"y2",1));String before=revision();
+        assertTrue(call("openbone_apply_edits",mutation(before,bad)).path("isError").asBoolean());assertEquals(before,revision());
+    }
+
+    @Test void portableSaveAndExplicitDirtyLoadKeepHistoryAndRoundTripPng() throws Exception {
+        var slot=EntityId.create();var region=EntityId.create();
+        ok("openbone_apply_edits",mutation(revision(),Map.of("op","create_slot","slotId",slot.value(),"name","body","boneId",BONE.value()),
+                Map.of("op","create_region","attachmentId",region.value(),"slotId",slot.value(),"name","part","pngPath",png().toString())));
+        String before=revision();Path target=temp.resolve("saved.json");var history=host.history;
+        var save=Map.of("path",target.toString(),"expectedRevision",before,"requestId","save-once");
+        var saved=ok("openbone_save_project",save);assertTrue(saved.path("adopted").asBoolean());assertFalse(saved.path("dirty").asBoolean());assertSame(history,host.history);assertEquals(1,saved.path("undoCount").asInt());
+        assertEquals(saved,ok("openbone_save_project",save));assertTrue(Files.isDirectory(temp.resolve("saved.json.assets")));
+        assertTrue(call("openbone_save_project",Map.of("path",target.toString(),"expectedRevision",before,"requestId","other-save")).path("isError").asBoolean());
+        ok("openbone_apply_edits",mutation(before,Map.of("op","edit_bone","boneId",BONE.value(),"name","changed")));
+        String dirty=revision();
+        assertTrue(call("openbone_load_project",Map.of("path",target.toString(),"expectedRevision",dirty,"requestId","reject-dirty","dirtyPolicy","reject")).path("isError").asBoolean());assertEquals(dirty,revision());
+        Path corrupt=temp.resolve("corrupt.json");Files.writeString(corrupt,"bad");
+        assertTrue(call("openbone_load_project",Map.of("path",corrupt.toString(),"expectedRevision",dirty,"requestId","bad-load","dirtyPolicy","discard")).path("isError").asBoolean());assertEquals(dirty,revision());
+        var load=Map.of("path",target.toString(),"expectedRevision",dirty,"requestId","load-once","dirtyPolicy","discard");
+        var loaded=ok("openbone_load_project",load);assertFalse(loaded.path("dirty").asBoolean());assertEquals(0,loaded.path("undoCount").asInt());assertNotEquals(dirty,loaded.path("revision").asText());
+        assertEquals(loaded,ok("openbone_load_project",load));
+        edt(()->{var attachment=(RegionAttachment)host.history.state().model().attachment(region);assertTrue(Files.isRegularFile(Path.of(attachment.source())));assertEquals("root",host.history.state().model().bone(BONE).name());return null;});
+    }
+
+    @Test void manualEditDuringWorkerValidationRejectsCandidateAtPublication() throws Exception {
+        String before=revision();var count=new java.util.concurrent.atomic.AtomicInteger();
+        host.prepareHook=()->{if(count.incrementAndGet()==2)host.history.execute("manual during AI validation",Commands.model(d->ModelEdits.editBone(d,BONE,b->b.withName("manual name"))));};
+        var result=call("openbone_apply_edits",mutation(before,create(),key(0,"ROTATE",0)));
+        assertTrue(result.path("isError").asBoolean());
+        edt(()->{assertEquals("manual name",host.history.state().model().bone(BONE).name());assertTrue(host.history.state().model().animations().isEmpty());assertEquals(1,host.history.undoCount());return null;});
     }
 }

@@ -6,7 +6,7 @@ MCP 是專案重點功能。外部 AI 可連線至目前編輯器，讀取專案
 
 Openbone 是一款以 Spine 工作流程為參考的桌面 2D 骨骼動畫編輯器，面向遊戲角色、道具與技能特效的製作與預覽。專案使用 Java 17、Swing 與 libGDX / LWJGL，實現從骨骼搭建、PNG 附件綁定、網格與權重編輯，到關鍵影格動畫與資源包匯出的工作流程。
 
-專案對標 Spine 的骨骼、插槽、外觀、附件、時間軸與約束等核心概念，並以 **Spine 4.2.22 JSON 匯出格式的受支援子集**作為交換格式。目前版本為 `0.1.0-SNAPSHOT`，仍在開發中；相容範圍以目前實作為準，不能視為對 Spine 全功能、全版本的完整替代。
+專案對標 Spine 的骨骼、插槽、外觀、附件、時間軸與約束等核心概念，並以 **Spine 4.2.22 JSON 匯出格式的受支援子集**作為交換格式。目前版本為 `0.1.3`，仍在開發中；相容範圍以目前實作為準，不能視為對 Spine 全功能、全版本的完整替代。
 
 ## 主要功能
 
@@ -50,9 +50,18 @@ Openbone 使用自己的可編輯專案格式，支援匯入與匯出限定範�
 
 接入遊戲時，請使用匹配目標格式的執行時，並在目標引擎中驗證實際播放效果。Openbone 的專案 JSON、資源包入口 `current.json` 與 Spine 骨架 JSON 是不同用途的檔案。
 
-## 建置與執行
+## 一般使用者：下載即用
 
-### 環境需求
+Windows x64 使用者可從 [Releases](https://github.com/Samlinb/openbone/releases) 選擇 Windows 發行附件：
+
+- **可攜 ZIP**（`Openbone-<版本>-windows-x64-portable.zip`）：完整解壓縮後，雙擊 `Openbone/Openbone.exe`。
+- **離線安裝 EXE**（`Openbone-<版本>-windows-x64-setup.exe`）：安裝後從安裝目錄啟動 `Openbone.exe`；預設安裝至目前使用者目錄，無需管理員權限。
+
+兩種套件均內含 Java 執行環境、應用程式依賴與圖形原生函式庫，安裝及啟動可離線進行，不需安裝 Java 或 Maven。請保留完整程式目錄。需要 Windows x64 及支援 OpenGL 的顯示卡驅動程式。診斷可使用 `Openbone-cli.exe --environment`。建置與驗證範圍見 [發行說明](docs/DISTRIBUTION.md)；舊版 Release 可能僅提供 JAR。
+
+## 開發者：建置與執行
+
+### 原始碼建置環境需求
 
 - JDK 17 或更高版本。
 - Maven，且 `mvn` 已加入 `PATH`；倉庫目前未提供 Maven Wrapper。
@@ -66,15 +75,15 @@ Openbone 使用自己的可編輯專案格式，支援匯入與匯出限定範�
 
 ```shell
 mvn clean package
-java -jar target/openbone-0.1.0-SNAPSHOT.jar
+java -jar target/openbone-0.1.3.jar
 ```
 
-建置會產生包含依賴的可執行 JAR。不要使用 `original-openbone-0.1.0-SNAPSHOT.jar` 作為獨立發行包。
+建置會產生包含依賴的可執行 JAR。不要使用 `original-openbone-0.1.3.jar` 作為獨立發行包。
 
 指定繁體中文介面：
 
 ```shell
-java -Dopenbone.lang=zh-TW -jar target/openbone-0.1.0-SNAPSHOT.jar
+java -Dopenbone.lang=zh-TW -jar target/openbone-0.1.3.jar
 ```
 
 語言參數支援 `en`、`zh-CN`、`zh-TW`。也可透過介面的語言選單切換，重新啟動後生效；首次啟動預設使用英文。
@@ -83,16 +92,16 @@ java -Dopenbone.lang=zh-TW -jar target/openbone-0.1.0-SNAPSHOT.jar
 
 ```shell
 # 查看版本
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --version
+java -jar target/openbone-0.1.3.jar --version
 
 # 查看 Java、作業系統、螢幕與使用者狀態目錄等環境資訊
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --environment
+java -jar target/openbone-0.1.3.jar --environment
 
 # 啟動並開啟 Openbone 專案
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --open "path/to/character.json"
+java -jar target/openbone-0.1.3.jar --open "path/to/character.json"
 
 # 校驗 Openbone 專案，輸出 schema 版本、物件數量與正規化 SHA-256
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --validate-project "path/to/character.json"
+java -jar target/openbone-0.1.3.jar --validate-project "path/to/character.json"
 ```
 
 `--open` 與 `--validate-project` 接受 Openbone 專案檔案。匯入 Spine 匯出的 JSON 請使用編輯器中的「匯入 4.2.22 JSON」。專案校驗失敗時行程返回結束碼 `2`。
@@ -204,7 +213,7 @@ packaging/installer/       # Windows 安裝程式原始碼
 
 **提示找不到 `mvn` 或 `java`？**
 
-安裝 Maven 與 JDK 17+，設定 `PATH` 後重新開啟終端機，用 `mvn -version` 與 `java -version` 檢查。
+一般使用者請使用上述 Windows 發行套件，不需這些指令。只有原始碼開發者需要安裝 Maven 與 JDK 17+，設定 `PATH` 後用 `mvn -version` 與 `java -version` 檢查。
 
 **圖片遺失或遷移專案後看不到附件？**
 

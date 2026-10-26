@@ -46,6 +46,14 @@ public final class ProjectDocument {
         return Optional.ofNullable(path);
     }
 
+    /** Publish metadata from a successful worker save, preserving this history and selection. */
+    public void acceptSavedCopy(ProjectDocument copy) {
+        history.requireIdle();
+        if(copy.path==null||copy.history.isDirty()||!copy.history.state().model().equals(history.state().model()))
+            throw new IllegalStateException("Saved copy does not match current project");
+        path=copy.path; resourceBase=copy.resourceBase; portable=copy.portable; history.markSaved();
+    }
+
     public void open(Path source) throws IOException {
         open(source, UnaryOperator.identity());
     }

@@ -1,10 +1,12 @@
 # OpenBone MCP
 
+Version 0.1.3 exposes MCP API v2 with nine tools. See [MCP API v2](MCP_V2.md) for scene construction, Bezier curves, save/load, playback, camera and clean previews. The original six tools below remain supported, with the extensions described there.
+
 MCP is a core feature of the project. An external AI can connect to a running OpenBone instance, read the project, batch-edit bone keyframes, inspect the actual OpenGL preview, and then iterate or undo. Model inference is the client's responsibility; OpenBone does not need a model API key.
 
 ## Starting and connecting
 
-1. Build and start the latest program: `mvn package`, then run `java -jar target/openbone-0.1.2.jar` (the file name depends on the current POM version).
+1. Build and start the latest program: `mvn package`, then run `java -jar target/openbone-0.1.3.jar` (the file name depends on the current POM version).
 2. Open a project and choose **MCP → Start MCP and show connection**.
 3. In an MCP client on the same machine that supports Streamable HTTP, enter the URL shown in the window and set the `Authorization: Bearer <token>` request header.
 4. The connection information window can stay open; before calling, close modal dialogs such as file pickers, and finish or cancel any in-progress preview drag.
@@ -17,7 +19,7 @@ For automated startup, you can pin the port and supply the token through an envi
 ```powershell
 # Use a self-generated random token: 32 to 256 letters, digits, underscores, and hyphens.
 $env:OPENBONE_MCP_TOKEN = '<random token>'
-java -Dopenbone.mcp.port=39871 -jar target/openbone-0.1.2.jar --open D:\assets\character.json
+java -Dopenbone.mcp.port=39871 -jar target/openbone-0.1.3.jar --open D:\assets\character.json
 ```
 
 `openbone.mcp.port=0` selects a free port. If the token is omitted, one is generated automatically and shown in the connection information window. Never commit the actual token to version control or logs.
@@ -112,7 +114,7 @@ The preview enters Animate mode, switches the animation, and pauses at the exact
 - Invalid batches preserve the model, selection, dirty state, and redo history. Preparing an operation may commit valid pending fields in the UI; this counts as the user's own edit and invalidates the old revision.
 - While a drag is in progress or a modal dialog is open, the call returns busy and never force-cancels user interaction.
 - Undo shares history with manual operations; check `undoLabel` and the revision first. Each batch of AI edits corresponds to one undo step.
-- This version provides no save, export, arbitrary code execution, or filesystem-write tools; results are saved through the existing menu.
+- API v2 adds explicit project save/load tools; see the [IO contract](MCP_V2.md). There is no export, arbitrary code execution, deletion or generic filesystem-write tool.
 
 ## Implementation basis and verification
 

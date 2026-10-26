@@ -600,6 +600,18 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             language.add(item);
         }
         view.add(language);
+        view.addSeparator();
+        menu(view,m("view.frameCurrent"),null,this::frameCurrentPose);
+        var bonesVisible=new JCheckBoxMenuItem(m("view.showBones"),true);
+        var gridVisible=new JCheckBoxMenuItem(m("view.showGrid"),true);
+        bonesVisible.addActionListener(e->viewport.displayOptions(bonesVisible.isSelected(),null));
+        gridVisible.addActionListener(e->viewport.displayOptions(null,gridVisible.isSelected()));
+        view.add(bonesVisible);view.add(gridVisible);
+        view.addMenuListener(new javax.swing.event.MenuListener() {
+            public void menuSelected(javax.swing.event.MenuEvent e) {bonesVisible.setSelected(viewport.showBones());gridVisible.setSelected(viewport.showGrid());}
+            public void menuDeselected(javax.swing.event.MenuEvent e) {}
+            public void menuCanceled(javax.swing.event.MenuEvent e) {}
+        });
         bar.add(file);
         bar.add(edit);
         bar.add(view);
@@ -628,7 +640,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             public Map<String, Object> context() {
                 return Map.of("projectPath", document.path().map(Path::toString).orElse(""),
                         "animationId", model().animations().isEmpty() ? "" : animation.active().value(),
-                        "time", animation.time(), "mode", animation.animate() ? "animate" : "setup", "playing", animation.playing());
+                        "time", animation.time(), "mode", animation.animate() ? "animate" : "setup", "playing", animation.playing(),
+                        "showBones",viewport.showBones(),"showGrid",viewport.showGrid());
             }
             public void prepare() {
                 if (closing || !isShowing()) throw new IllegalStateException("Editor is closed or hidden.");
@@ -639,7 +652,21 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                 if (!animation.editing()) throw new IllegalStateException("EDITOR_BUSY: finish the active field edit and retry.");
             }
             public void changed() { EditorFrame.this.changed(); }
+            public ProjectDocument project() {return document;}
+            public void installProject(ProjectDocument next) {document=next;animation.reset();resetAssets();assets.reload();changed();frameCurrentPose();}
+            public void control(EditorMcpTools.ViewControl control) {
+                // Validate requested animation/time before changing view options.
+                if(control.animation()!=null)model().animation(control.animation());
+                if(control.time()!=null)PhysicsPlayer.validateTime(model(),control.animation()==null?animation.active():control.animation(),control.time());
+                animation.remoteControl(control.action(),control.animation(),control.time(),control.loop());
+                viewport.displayOptions(control.showBones(),control.showGrid());
+                validate();
+                if(control.action().equals("frame"))frameCurrentPose();
+            }
             public java.util.concurrent.CompletableFuture<EditorMcpTools.Preview> capture(EntityId clip, double seconds, String revision) {
+                return capture(clip,seconds,revision,new EditorMcpTools.CaptureOptions(false,null,null));
+            }
+            public java.util.concurrent.CompletableFuture<EditorMcpTools.Preview> capture(EntityId clip, double seconds, String revision,EditorMcpTools.CaptureOptions options) {
                 var raw = viewport.capture(() -> {
                     prepare();
                     if (!history().revision().equals(revision)) throw new IllegalStateException("REVISION_CONFLICT: read context again.");
@@ -647,12 +674,14 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                     // Entering Animate changes timeline height. Read the resized framebuffer,
                     // not the dimensions from the preceding Setup frame.
                     validate();
+                    viewport.displayOptions(options.showBones(),options.showGrid());
+                    if(options.fit())frameCurrentPose();
                 });
                 var result = raw.thenApply(image -> {
                     var pose = evaluatedPose();
                     var bones = model().bones().stream().limit(200).map(b -> Map.of("id", b.id().value(), "origin", pose.bones().get(b.id()).origin(), "tip", pose.bones().get(b.id()).tip())).toList();
                     return new EditorMcpTools.Preview(image, Map.of("revision", history().revision(), "animationId", clip.value(),
-                            "time", animation.time(), "bones", bones, "totalBones", model().bones().size()));
+                            "time", animation.time(), "bones", bones, "totalBones", model().bones().size(),"showBones",viewport.showBones(),"showGrid",viewport.showGrid()));
                 });
                 result.whenComplete((value, failed) -> { if (result.isCancelled()) raw.cancel(false); });
                 return result;
@@ -2676,6 +2705,19 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         double zoom=Math.min(width*.85/Math.max(1,maxX-minX),height*.85/Math.max(1,maxY-minY));
         var camera=viewport.camera();camera.reset();camera.zoomAt(zoom,width/2.,height/2.,width,height);
         camera.pan(-(minX/2+maxX/2)*camera.zoom(),(minY/2+maxY/2)*camera.zoom());changed();
+    }
+
+    private void frameCurrentPose() {
+        var pose=evaluatedPose();
+        var points=new ArrayList<Vec2>(VisibleGeometry.evaluate(displayModel(),pose).stream().filter(d->d.color().a()>0).flatMap(d->d.geometry().vertices().stream()).toList());
+        if(points.isEmpty())for(var bone:pose.bones().values()) {points.add(bone.origin());points.add(bone.tip());}
+        if(points.isEmpty()) {viewport.camera().reset();return;}
+        double minX=points.stream().mapToDouble(Vec2::x).min().orElse(0),maxX=points.stream().mapToDouble(Vec2::x).max().orElse(0);
+        double minY=points.stream().mapToDouble(Vec2::y).min().orElse(0),maxY=points.stream().mapToDouble(Vec2::y).max().orElse(0);
+        int width=Math.max(1,viewport.canvas().getWidth()),height=Math.max(1,viewport.canvas().getHeight());
+        double zoom=Math.min(width*.85/Math.max(1,maxX-minX),height*.85/Math.max(1,maxY-minY));
+        var camera=viewport.camera();camera.reset();camera.zoomAt(zoom,width/2.,height/2.,width,height);
+        camera.pan(-(minX/2+maxX/2)*camera.zoom(),(minY/2+maxY/2)*camera.zoom());
     }
 
     private void resetAssets() {

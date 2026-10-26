@@ -4,11 +4,13 @@
 
 Openbone 是一款以 Spine 工作流为参考的桌面 2D 骨骼动画编辑器，面向游戏角色、道具和技能特效的制作与预览。项目使用 Java 17、Swing 和 libGDX / LWJGL，实现从骨骼搭建、PNG 附件绑定、网格与权重编辑，到关键帧动画和资源包导出的工作流程。
 
-项目对标 Spine 的骨骼、插槽、皮肤、附件、时间轴和约束等核心概念，并以 **Spine 4.2.22 JSON 导出格式的受支持子集**作为交换格式。目前版本为 `0.1.0-SNAPSHOT`，仍在开发中；兼容范围以当前实现为准，不能视为对 Spine 全功能、全版本的完整替代。
+项目对标 Spine 的骨骼、插槽、皮肤、附件、时间轴和约束等核心概念，并以 **Spine 4.2.22 JSON 导出格式的受支持子集**作为交换格式。目前版本为 `0.1.3`，仍在开发中；兼容范围以当前实现为准，不能视为对 Spine 全功能、全版本的完整替代。
 
 ## 主要功能
 
-**MCP 是项目重点功能。** 外部 AI 可以连接当前编辑器，读取工程、批量编辑骨骼关键帧、获取实际 OpenGL 预览，以及撤销和重做。通过 **MCP → 启动 MCP 并显示连接** 获取本机连接信息，详见 [MCP 使用与开发说明](docs/MCP.md)。
+项目采用**实际项目需求驱动工具迭代**的方式：内容制作中遇到的功能缺口、错误和效率问题，都可转化为 OpenBone 的改进任务；改进后回到原始制作场景验收。详见 [实际项目驱动的迭代流程](docs/PROJECT_DRIVEN_DEVELOPMENT.md)。
+
+**MCP 是项目重点功能。** 0.1.3 的 MCP API v2 支持从空白工程创建骨骼、插槽和 PNG 附件，编辑贝塞尔关键帧，控制播放与取景，获取无骨骼/网格覆盖的实际 OpenGL 预览，保存/加载工程，以及整批撤销和重做。通过 **MCP → 启动 MCP 并显示连接** 获取本机连接信息，详见 [MCP 使用与开发说明](docs/MCP.md)。
 
 | 模块 | 当前能力 |
 | --- | --- |
@@ -50,9 +52,18 @@ Openbone 使用自己的可编辑工程格式，支持导入和导出限定范�
 
 接入游戏时，请使用匹配目标格式的运行时，并在目标引擎中验证实际播放效果。Openbone 的工程 JSON、资源包入口 `current.json` 与 Spine 骨架 JSON 是不同用途的文件。
 
-## 构建与运行
+## 普通用户：下载即用
 
-### 环境要求
+Windows x64 用户请从 [Releases](https://github.com/Samlinb/openbone/releases) 选择对应版本的 Windows 发行附件：
+
+- **便携 ZIP**（`Openbone-<版本>-windows-x64-portable.zip`）：完整解压，双击 `Openbone/Openbone.exe`。
+- **离线安装 EXE**（`Openbone-<版本>-windows-x64-setup.exe`）：运行并安装，再从安装目录启动 `Openbone.exe`；默认安装到当前用户目录，无需管理员权限。
+
+两种发行包都内置 Java 运行时、应用依赖和图形本地库，安装和启动无需联网，也无需安装 Java 或 Maven。请保留完整程序目录。需要 Windows x64 和支持 OpenGL 的显卡驱动。诊断可使用 `Openbone-cli.exe --environment`。发行构建方式与验证范围见 [发行说明](docs/DISTRIBUTION.md)；旧版 Release 可能仅提供 JAR。
+
+## 开发者：构建与运行
+
+### 源码构建环境要求
 
 - JDK 17 或更高版本。
 - Maven，且 `mvn` 已加入 `PATH`；仓库目前未提供 Maven Wrapper。
@@ -66,15 +77,15 @@ Openbone 使用自己的可编辑工程格式，支持导入和导出限定范�
 
 ```shell
 mvn clean package
-java -jar target/openbone-0.1.0-SNAPSHOT.jar
+java -jar target/openbone-0.1.3.jar
 ```
 
-构建会生成包含依赖的可执行 JAR。不要使用 `original-openbone-0.1.0-SNAPSHOT.jar` 作为独立发行包。
+构建会生成包含依赖的可执行 JAR。不要使用 `original-openbone-0.1.3.jar` 作为独立发行包。
 
 指定简体中文界面：
 
 ```shell
-java -Dopenbone.lang=zh-CN -jar target/openbone-0.1.0-SNAPSHOT.jar
+java -Dopenbone.lang=zh-CN -jar target/openbone-0.1.3.jar
 ```
 
 语言参数支持 `en`、`zh-CN`、`zh-TW`。也可通过界面的语言菜单切换，重启后生效；首次启动默认使用英文。
@@ -83,16 +94,16 @@ java -Dopenbone.lang=zh-CN -jar target/openbone-0.1.0-SNAPSHOT.jar
 
 ```shell
 # 查看版本
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --version
+java -jar target/openbone-0.1.3.jar --version
 
 # 查看 Java、操作系统、屏幕与用户状态目录等环境信息
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --environment
+java -jar target/openbone-0.1.3.jar --environment
 
 # 启动并打开 Openbone 工程
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --open "path/to/character.json"
+java -jar target/openbone-0.1.3.jar --open "path/to/character.json"
 
 # 校验 Openbone 工程，输出 schema 版本、对象数量和规范化 SHA-256
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --validate-project "path/to/character.json"
+java -jar target/openbone-0.1.3.jar --validate-project "path/to/character.json"
 ```
 
 `--open` 和 `--validate-project` 接受 Openbone 工程文件。导入 Spine 导出的 JSON 请使用编辑器中的“导入 4.2.22 JSON”。工程校验失败时进程返回退出码 `2`。
@@ -212,7 +223,7 @@ packaging/installer/       # Windows 安装器源码
 
 **提示找不到 `mvn` 或 `java`？**
 
-安装 Maven 和 JDK 17+，配置 `PATH` 后重新打开终端，用 `mvn -version` 和 `java -version` 检查。
+普通用户请使用上面的 Windows 发行包，无需这些命令。只有源码开发者需要安装 Maven 和 JDK 17+，配置 `PATH` 后用 `mvn -version` 和 `java -version` 检查。
 
 **图片丢失或迁移工程后看不到附件？**
 

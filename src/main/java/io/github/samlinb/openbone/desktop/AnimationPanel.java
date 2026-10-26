@@ -375,6 +375,17 @@ final class AnimationPanel extends JPanel {
         host.changed();
     }
 
+    void remoteControl(String action,EntityId clip,Double seconds,Boolean looping) {
+        if(clip!=null)model().animation(clip);
+        EntityId target=clip==null?active():clip;
+        if(seconds!=null||action.equals("play")||action.equals("seek"))
+            remoteSeek(target,seconds==null?clock.time():seconds);
+        if(looping!=null) {clock.loop(looping);loop.setSelected(looping);}
+        if(action.equals("play"))clock.play(System.nanoTime(),duration());
+        if(action.equals("pause"))clock.pause(System.nanoTime(),duration());
+        host.changed();
+    }
+
     Map<EntityId, Transform> pose() {
         return animate && !model().animations().isEmpty()
                 ? AnimationSampler.pose(model(), active(), clock.time(), false)

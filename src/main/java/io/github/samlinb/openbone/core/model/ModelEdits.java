@@ -65,6 +65,14 @@ public final class ModelEdits {
         return new DocumentSnapshot(d.bones(), slots, d.attachments(), d.animations(), d.constraints(), d.resources());
     }
 
+    /** Setup order is back to front. Explicit animation order keys retain their ID order. */
+    public static DocumentSnapshot reorderSlots(DocumentSnapshot d, List<EntityId> order) {
+        var slots = new LinkedHashMap<EntityId,Slot>(); d.slots().forEach(s -> slots.put(s.id(),s));
+        if(order.size()!=slots.size()||new HashSet<>(order).size()!=slots.size()||!slots.keySet().containsAll(order))
+            throw new IllegalArgumentException("Slot order must be a permutation of all slot IDs");
+        return new DocumentSnapshot(d.bones(),order.stream().map(slots::get).toList(),d.attachments(),d.animations(),d.constraints(),d.resources());
+    }
+
     public static DocumentSnapshot addAttachment(DocumentSnapshot d, Attachment attachment, boolean makeActive) {
         if (!d.resources().skins().isEmpty()) {
             var skins = new ArrayList<Skin>();

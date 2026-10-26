@@ -27,7 +27,7 @@ async def main():
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = (await session.list_tools()).tools
-            assert len(tools) == 6
+            assert len(tools) == 9
 
             async def call(name, args):
                 result = await session.call_tool(name, args)

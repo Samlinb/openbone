@@ -1,12 +1,12 @@
 # OpenBone
 
-MCP is a core project capability. A local AI client can query the live editor, edit bone keyframes atomically, capture actual OpenGL previews, and undo or redo changes. Use the **MCP** menu to start the service and view connection details. See the [MCP guide](docs/MCP.md) (Chinese).
+MCP is a core project capability. Version 0.1.3 (MCP API v2) lets a local AI build bones, slots and PNG attachments in the live editor, animate Bezier keyframes, capture clean GL previews, control playback, save/load projects, and undo/redo atomic batches. Use the **MCP** menu to start the service and view connection details. See the [MCP API v2 guide](docs/MCP_V2.md).
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
 Openbone is a desktop 2D skeletal animation editor that follows the Spine workflow, built for creating and previewing game characters, props, and skill effects. It uses Java 17, Swing, and libGDX / LWJGL, and covers the workflow from skeleton construction, PNG attachment binding, mesh and weight editing, to keyframe animation and asset-pack export.
 
-The project mirrors Spine's core concepts — bones, slots, skins, attachments, timelines, and constraints — and uses a **supported subset of the Spine 4.2.22 JSON export format** as its interchange format. The current version is `0.1.0-SNAPSHOT` and still under development; the compatibility scope is defined by the current implementation and is not a complete replacement for the full features or versions of Spine.
+The project mirrors Spine's core concepts — bones, slots, skins, attachments, timelines, and constraints — and uses a **supported subset of the Spine 4.2.22 JSON export format** as its interchange format. The current version is `0.1.3` and still under development; the compatibility scope is defined by the current implementation and is not a complete replacement for the full features or versions of Spine.
 
 ## Key Features
 
@@ -50,9 +50,18 @@ Openbone uses its own editable project format and supports importing and exporti
 
 When integrating into a game, use a runtime that matches the target format and verify actual playback in the target engine. Openbone's project JSON, the asset-pack entry `current.json`, and the Spine skeleton JSON serve different purposes.
 
-## Build and Run
+## Download and Run
 
-### Requirements
+Windows x64 users can choose the Windows assets on [Releases](https://github.com/Samlinb/openbone/releases):
+
+- **Portable ZIP** (`Openbone-<version>-windows-x64-portable.zip`): extract everything and double-click `Openbone/Openbone.exe`.
+- **Offline installer** (`Openbone-<version>-windows-x64-setup.exe`): install, then launch `Openbone.exe` in the chosen directory. The default per-user installation needs no administrator privileges.
+
+Both packages include Java, application dependencies and native graphics libraries. Installation and startup work offline, without installing Java or Maven. Keep the entire application directory. Windows x64 and an OpenGL-capable graphics driver are required. Use `Openbone-cli.exe --environment` for diagnostics. See [distribution notes](docs/DISTRIBUTION.md) for building and verification; older releases may only offer a JAR.
+
+## Build and Run from Source
+
+### Developer Requirements
 
 - JDK 17 or later.
 - Maven with `mvn` on the `PATH`; the repository does not currently ship a Maven Wrapper.
@@ -66,15 +75,15 @@ From the project root:
 
 ```shell
 mvn clean package
-java -jar target/openbone-0.1.0-SNAPSHOT.jar
+java -jar target/openbone-0.1.3.jar
 ```
 
-The build produces an executable JAR with dependencies included. Do not use `original-openbone-0.1.0-SNAPSHOT.jar` as a standalone distribution.
+The build produces an executable JAR with dependencies included. Do not use `original-openbone-0.1.3.jar` as a standalone distribution.
 
 To launch with a Simplified Chinese UI:
 
 ```shell
-java -Dopenbone.lang=zh-CN -jar target/openbone-0.1.0-SNAPSHOT.jar
+java -Dopenbone.lang=zh-CN -jar target/openbone-0.1.3.jar
 ```
 
 Supported language values are `en`, `zh-CN`, `zh-TW`. You can also switch via the language menu in the UI, which takes effect after restart; English is the default on first launch.
@@ -83,16 +92,16 @@ Supported language values are `en`, `zh-CN`, `zh-TW`. You can also switch via th
 
 ```shell
 # Show version
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --version
+java -jar target/openbone-0.1.3.jar --version
 
 # Show environment info such as Java, OS, screen and user-state directory
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --environment
+java -jar target/openbone-0.1.3.jar --environment
 
 # Launch and open an Openbone project
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --open "path/to/character.json"
+java -jar target/openbone-0.1.3.jar --open "path/to/character.json"
 
 # Validate an Openbone project; prints schema version, object counts and normalized SHA-256
-java -jar target/openbone-0.1.0-SNAPSHOT.jar --validate-project "path/to/character.json"
+java -jar target/openbone-0.1.3.jar --validate-project "path/to/character.json"
 ```
 
 `--open` and `--validate-project` accept Openbone project files. To import JSON exported from Spine, use "Import 4.2.22 JSON" in the editor. When project validation fails, the process exits with code `2`.
@@ -204,7 +213,7 @@ During development, run `mvn verify` to execute the tests and integration verifi
 
 **`mvn` or `java` not found?**
 
-Install Maven and JDK 17+, configure `PATH`, reopen the terminal, and check with `mvn -version` and `java -version`.
+End users can use the Windows packages above without these commands. Source developers need Maven and JDK 17+ on `PATH`; check with `mvn -version` and `java -version`.
 
 **Images missing or attachments invisible after migrating a project?**
 

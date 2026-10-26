@@ -91,7 +91,7 @@ public final class EditorMcpServer implements AutoCloseable {
                     var initialized = json.createObjectNode().put("protocolVersion", VERSIONS.contains(params.get("protocolVersion").asText()) ? params.get("protocolVersion").asText() : PROTOCOL);
                     initialized.putObject("serverInfo").put("name", "openbone").put("version", io.github.samlinb.openbone.EditorApplication.version());
                     initialized.putObject("capabilities").putObject("tools").put("listChanged", false);
-                    initialized.put("instructions", "Operate the currently open OpenBone editor. Read context and query scene before editing. Use exact UUIDs, expectedRevision and a unique requestId. Keep the same requestId AND arguments on retries. Edits are atomic and undoable. Capture several animation times to inspect motion. Saving/exporting is not exposed in this version.");
+                    initialized.put("instructions", "Operate the currently open OpenBone editor. Read context for mcpApiVersion and capabilities, then query scene before editing. Build bones, slots, PNG regions and animations with apply_edits. Use exact UUIDs, expectedRevision and a unique requestId; retain identical arguments on retries. Batches are atomic and undoable. Capture several times, optionally fit and hide overlays. Project save/load and playback are available; loading dirty projects requires explicit dirtyPolicy. Export is not exposed.");
                     result = initialized;
                 }
                 case "ping" -> result = json.createObjectNode();
