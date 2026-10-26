@@ -1,5 +1,7 @@
 # Openbone
 
+MCP 是專案重點功能。外部 AI 可連線至目前編輯器，讀取專案、批次編輯骨骼關鍵影格、取得實際 OpenGL 預覽，並復原或重做變更。從 **MCP** 選單啟動服務並查看連線資訊，詳見 [MCP 使用與開發說明](docs/MCP.md)（簡體中文）。
+
 [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
 Openbone 是一款以 Spine 工作流程為參考的桌面 2D 骨骼動畫編輯器，面向遊戲角色、道具與技能特效的製作與預覽。專案使用 Java 17、Swing 與 libGDX / LWJGL，實現從骨骼搭建、PNG 附件綁定、網格與權重編輯，到關鍵影格動畫與資源包匯出的工作流程。

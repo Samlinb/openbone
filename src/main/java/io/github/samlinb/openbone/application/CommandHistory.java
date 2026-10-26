@@ -14,9 +14,13 @@ public final class CommandHistory {
     private EditorState previewBase;
     private String previewLabel;
     private boolean applying;
+    private final String revisionScope = UUID.randomUUID().toString();
+    private long revision;
 
     public CommandHistory(DocumentSnapshot initial) { reset(initial); }
     public EditorState state() { return state; }
+    /** Opaque optimistic concurrency token, including undo/redo and document resets. */
+    public String revision() { return revisionScope + ":" + revision; }
     public boolean isDirty() { return !state.model().equals(saved); }
     public boolean isPreviewing() { return previewBase != null; }
     public int undoCount() { return cursor; }
@@ -40,30 +44,34 @@ public final class CommandHistory {
         if (!before.model().equals(after.model())) {
             entries.subList(cursor, entries.size()).clear();
             entries.add(new Entry(label, before, after)); cursor++;
+            revision++;
         }
         state = after;
     }
     public boolean undo() {
         idle(); if (cursor == 0) return false;
-        state = entries.get(--cursor).before(); return true;
+        state = entries.get(--cursor).before(); revision++; return true;
     }
     public boolean redo() {
         idle(); if (cursor == entries.size()) return false;
-        state = entries.get(cursor++).after(); return true;
+        state = entries.get(cursor++).after(); revision++; return true;
     }
     public void beginPreview(String label) {
         idle(); requireLabel(label); previewBase = state; previewLabel = label;
     }
     /** Absolute edit relative to begin, not accumulated deltas. Failed update retains last valid preview. */
     public void updatePreview(EditCommand absoluteEdit) {
-        previewRequired(); state = apply(absoluteEdit, previewBase);
+        previewRequired(); EditorState next = apply(absoluteEdit, previewBase);
+        if (!state.model().equals(next.model())) revision++;
+        state = next;
     }
     public void commitPreview() {
         previewRequired(); EditorState before = previewBase; String label = previewLabel;
         previewBase = null; previewLabel = null; publish(label, before, state);
     }
     public void cancelPreview() {
-        previewRequired(); state = previewBase; previewBase = null; previewLabel = null;
+        previewRequired(); if (!state.model().equals(previewBase.model())) revision++;
+        state = previewBase; previewBase = null; previewLabel = null;
     }
     public void markSaved() { idle(); saved = state.model(); }
     /** An imported document has no saved project yet. Undo cannot make it a saved file. */
@@ -71,6 +79,7 @@ public final class CommandHistory {
     public void reset(DocumentSnapshot model) {
         idle(); EditorState next = EditorState.of(model);
         entries.clear(); cursor = 0; state = next; saved = model;
+        revision++;
     }
     /** IO must refuse saving/opening during preview, before touching files. */
     public void requireIdle() { idle(); }

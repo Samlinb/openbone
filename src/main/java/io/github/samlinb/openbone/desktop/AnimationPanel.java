@@ -363,6 +363,18 @@ final class AnimationPanel extends JPanel {
         return clock.time();
     }
 
+    /** Exact MCP seek; intentionally independent of the interactive frame snapping setting. */
+    void remoteSeek(EntityId clip, double seconds) {
+        model().animation(clip);
+        PhysicsPlayer.validateTime(model(), clip, seconds);
+        active = clip;
+        animate = true;
+        observedModel = model();
+        clock.seek(seconds);
+        clearEvents();
+        host.changed();
+    }
+
     Map<EntityId, Transform> pose() {
         return animate && !model().animations().isEmpty()
                 ? AnimationSampler.pose(model(), active(), clock.time(), false)

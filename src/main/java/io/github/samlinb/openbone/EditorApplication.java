@@ -11,7 +11,7 @@ public final class EditorApplication {
     private EditorApplication() {
     }
 
-    private static String version() {
+    public static String version() {
         try (var input = EditorApplication.class.getResourceAsStream("/META-INF/maven/io.github.samlinb.openbone/openbone/pom.properties")) {
             if (input == null) return "dev";
             var properties = new java.util.Properties(); properties.load(input);

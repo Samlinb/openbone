@@ -1,5 +1,7 @@
 # OpenBone
 
+MCP is a core project capability. A local AI client can query the live editor, edit bone keyframes atomically, capture actual OpenGL previews, and undo or redo changes. Use the **MCP** menu to start the service and view connection details. See the [MCP guide](docs/MCP.md) (Chinese).
+
 [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
 
 Openbone is a desktop 2D skeletal animation editor that follows the Spine workflow, built for creating and previewing game characters, props, and skill effects. It uses Java 17, Swing, and libGDX / LWJGL, and covers the workflow from skeleton construction, PNG attachment binding, mesh and weight editing, to keyframe animation and asset-pack export.

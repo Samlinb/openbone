@@ -19,6 +19,7 @@ import io.github.samlinb.openbone.core.model.*;
 import io.github.samlinb.openbone.viewport.*;
 import io.github.samlinb.openbone.io.*;
 import io.github.samlinb.openbone.i18n.M;
+import io.github.samlinb.openbone.mcp.*;
 import static io.github.samlinb.openbone.i18n.M.m;
 
 /**
@@ -33,6 +34,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
     private final ImageResourcePanel imageResources;
     private final JTabbedPane navigation = new JTabbedPane();
     private final PhysicsPlayer physics = new PhysicsPlayer();
+    private EditorMcpServer mcpServer;
+    private String mcpToken;
     private final JTree tree = new JTree();
     private final JPanel properties = new PropertyPanel();
     private final JLabel status = new JLabel(" ");
@@ -307,6 +310,10 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             public void windowClosing(WindowEvent e) {
                 closeRequested();
             }
+            @Override
+            public void windowClosed(WindowEvent e) {
+                if (mcpServer != null) { mcpServer.close(); mcpServer = null; mcpToken = null; }
+            }
         });
         diagnostics = new javax.swing.Timer(System.getProperty("openbone.performance") == null ? 400 : 5000,
                 e -> writeDiagnostics());
@@ -335,6 +342,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
     public void showEditor() {
         setVisible(true);
         viewport.canvas().requestFocusInWindow();
+        if (System.getProperty("openbone.mcp.port") != null)
+            guard(() -> startMcp(Integer.parseInt(System.getProperty("openbone.mcp.port"))));
         SwingUtilities.invokeLater(() -> {
             chooseRecovery(false);
         });
@@ -594,8 +603,76 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         bar.add(file);
         bar.add(edit);
         bar.add(view);
+        JMenu mcp = new JMenu("MCP");
+        menu(mcp, m("mcp.start"), null, () -> { startMcp(0); showMcpConnection(); });
+        menu(mcp, m("mcp.connection"), null, this::showMcpConnection);
+        menu(mcp, m("mcp.stop"), null, () -> {
+            if (mcpServer != null) { mcpServer.close(); mcpServer = null; mcpToken = null; }
+            message(m("mcp.stopped"));
+        });
+        bar.add(mcp);
         return bar;
 
+    }
+
+    private void startMcp(int port) {
+        if (mcpServer != null) return;
+        String configured = System.getenv("OPENBONE_MCP_TOKEN");
+        if (configured == null || configured.isBlank()) {
+            byte[] secret = new byte[32]; new java.security.SecureRandom().nextBytes(secret);
+            configured = Base64.getUrlEncoder().withoutPadding().encodeToString(secret);
+        }
+        String token = configured;
+        var tools = new EditorMcpTools(new EditorMcpTools.Host() {
+            public CommandHistory history() { return EditorFrame.this.history(); }
+            public Map<String, Object> context() {
+                return Map.of("projectPath", document.path().map(Path::toString).orElse(""),
+                        "animationId", model().animations().isEmpty() ? "" : animation.active().value(),
+                        "time", animation.time(), "mode", animation.animate() ? "animate" : "setup", "playing", animation.playing());
+            }
+            public void prepare() {
+                if (closing || !isShowing()) throw new IllegalStateException("Editor is closed or hidden.");
+                for (Window window : Window.getWindows())
+                    if (window instanceof Dialog dialog && dialog.isModal() && dialog.isShowing())
+                        throw new IllegalStateException("EDITOR_BUSY: close the active dialog and retry.");
+                history().requireIdle();
+                if (!animation.editing()) throw new IllegalStateException("EDITOR_BUSY: finish the active field edit and retry.");
+            }
+            public void changed() { EditorFrame.this.changed(); }
+            public java.util.concurrent.CompletableFuture<EditorMcpTools.Preview> capture(EntityId clip, double seconds, String revision) {
+                var raw = viewport.capture(() -> {
+                    prepare();
+                    if (!history().revision().equals(revision)) throw new IllegalStateException("REVISION_CONFLICT: read context again.");
+                    animation.remoteSeek(clip, seconds);
+                    // Entering Animate changes timeline height. Read the resized framebuffer,
+                    // not the dimensions from the preceding Setup frame.
+                    validate();
+                });
+                var result = raw.thenApply(image -> {
+                    var pose = evaluatedPose();
+                    var bones = model().bones().stream().limit(200).map(b -> Map.of("id", b.id().value(), "origin", pose.bones().get(b.id()).origin(), "tip", pose.bones().get(b.id()).tip())).toList();
+                    return new EditorMcpTools.Preview(image, Map.of("revision", history().revision(), "animationId", clip.value(),
+                            "time", animation.time(), "bones", bones, "totalBones", model().bones().size()));
+                });
+                result.whenComplete((value, failed) -> { if (result.isCancelled()) raw.cancel(false); });
+                return result;
+            }
+        });
+        try {
+            mcpServer = new EditorMcpServer(port, token, tools);
+            mcpToken = token;
+            message(m("mcp.started") + " " + mcpServer.url());
+        } catch (java.io.IOException failed) { throw new IllegalStateException("Cannot start MCP: " + failed.getMessage(), failed); }
+    }
+
+    private void showMcpConnection() {
+        if (mcpServer == null) { message(m("mcp.stopped")); return; }
+        var dialog = new JDialog(this, m("mcp.connection"), false);
+        var text = new JTextArea("URL: " + mcpServer.url() + "\n\nAuthorization: Bearer " + mcpToken
+                + "\n\n" + m("mcp.connectionHelp"), 9, 76);
+        text.setEditable(false); text.setLineWrap(true); text.setWrapStyleWord(true);
+        text.setMargin(new Insets(12, 12, 12, 12));
+        dialog.add(new JScrollPane(text)); dialog.pack(); dialog.setLocationRelativeTo(this); dialog.setVisible(true);
     }
 
     /** Language menu labels stay in their native form regardless of UI locale. */
@@ -2630,6 +2707,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         diagnostics.stop();
         Toolkit.getDefaultToolkit().removeAWTEventListener(diagnosticInput);
         animation.stop();
+        if (mcpServer != null) { mcpServer.close(); mcpServer = null; mcpToken = null; }
         viewport.close();
         writeDiagnostics();
         closing = true;

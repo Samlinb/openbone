@@ -102,6 +102,19 @@ public final class EditorViewport extends ApplicationAdapter {
     private int pixelWidth, pixelHeight;
     private final FrameTelemetry telemetry = new FrameTelemetry();
     private long renders, createdAt, firstRenderAt;
+    private record Capture(Runnable prepare, java.util.concurrent.CompletableFuture<java.awt.image.BufferedImage> result) {}
+    private final Deque<Capture> captures = new ArrayDeque<>();
+
+    /** Prepared and read in the same GL frame on EDT, never through a desktop screenshot. */
+    public java.util.concurrent.CompletableFuture<java.awt.image.BufferedImage> capture(Runnable prepare) {
+        requireEdt();
+        if (stopped || !canvas.isShowing())
+            throw new IllegalStateException("Viewport is not visible. Show the OpenBone editor and retry.");
+        if (captures.size() >= 4) throw new IllegalStateException("Preview queue is full. Retry after the current capture.");
+        var result = new java.util.concurrent.CompletableFuture<java.awt.image.BufferedImage>();
+        captures.addLast(new Capture(prepare, result));
+        return result;
+    }
 
     public EditorViewport(Host host, ImageAssets assets) {
         this.host = host;
@@ -546,9 +559,25 @@ public final class EditorViewport extends ApplicationAdapter {
             System.out.println("GL firstRender time=" + firstRenderAt + " displayable=" + canvas.isDisplayable()
                     + " showing=" + canvas.isShowing());
         }
+        Capture capture = captures.pollFirst();
+        if (capture != null && capture.result().isDone()) capture = null;
+        if (capture != null) {
+            try { capture.prepare().run(); }
+            catch (Exception failed) { capture.result().completeExceptionally(failed); capture = null; }
+        }
+        try { renderFrame(capture); }
+        catch (RuntimeException failed) {
+            if (capture != null) capture.result().completeExceptionally(failed);
+            throw failed;
+        }
+    }
+
+    private void renderFrame(Capture capture) {
         int w = canvas.getWidth(), h = canvas.getHeight();
-        if (w <= 0 || h <= 0)
+        if (w <= 0 || h <= 0) {
+            if (capture != null) capture.result().completeExceptionally(new IllegalStateException("Viewport has no drawable area."));
             return;
+        }
         var device = canvas.getGraphicsConfiguration().getDefaultTransform();
         int pw = (int) Math.round(w * device.getScaleX()), ph = (int) Math.round(h * device.getScaleY());
         if (pw != pixelWidth || ph != pixelHeight) {
@@ -728,6 +757,20 @@ public final class EditorViewport extends ApplicationAdapter {
             line(press, createEnd);
         }
         shapes.end();
+        if (capture != null) {
+            try {
+                if ((long) pw * ph > 16_000_000) throw new IllegalStateException("Viewport too large for a preview.");
+                byte[] rgba = com.badlogic.gdx.utils.ScreenUtils.getFrameBufferPixels(0, 0, pw, ph, true);
+                var image = new java.awt.image.BufferedImage(pw, ph, java.awt.image.BufferedImage.TYPE_INT_RGB);
+                int[] pixels = new int[pw * ph];
+                for (int i = 0; i < pixels.length; i++) {
+                    int k = i * 4;
+                    pixels[i] = ((rgba[k] & 255) << 16) | ((rgba[k + 1] & 255) << 8) | (rgba[k + 2] & 255);
+                }
+                image.setRGB(0, 0, pw, ph, pixels, 0, pw);
+                capture.result().complete(image);
+            } catch (Exception failed) { capture.result().completeExceptionally(failed); }
+        }
     }
 
     public Map<String, Object> metrics() {
@@ -750,6 +793,8 @@ public final class EditorViewport extends ApplicationAdapter {
         requireEdt();
         if (stopped)
             return;
+        captures.forEach(c -> c.result().completeExceptionally(new IllegalStateException("Editor closed.")));
+        captures.clear();
         cancel();
         KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(keys);
         backend.stop();
