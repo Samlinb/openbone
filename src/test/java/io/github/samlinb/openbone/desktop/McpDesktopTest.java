@@ -145,6 +145,55 @@ class McpDesktopTest {
             restore("openbone.userState", oldState); restore("openbone.mcp.port", oldPort);
         }
     }
+    @Test @EnabledIfSystemProperty(named="openbone.spineboy",matches="true")
+    void spineboyColorMetadataImagesReachTheLiveGlPreview() throws Exception {
+        var imported = new io.github.samlinb.openbone.application.ProjectDocument(DocumentSnapshot.EMPTY);
+        imported.openResolved(Path.of("res/spineboy/spineboy-pro.spine"));
+        assertTrue(imported.importWarnings().stream().noneMatch(w -> w.contains("image unavailable")),
+                () -> imported.importWarnings().toString());
+        assertTrue(imported.importWarnings().stream().noneMatch(w -> w.contains("invalid configuration")
+                || w.contains("3.8 recovery")), () -> imported.importWarnings().toString());
+        Path project = temp.resolve("spineboy.json");
+        imported.savePortable(project);
+        String oldState = System.getProperty("openbone.userState"), oldPort = System.getProperty("openbone.mcp.port");
+        System.setProperty("openbone.userState", temp.resolve("state").toString());
+        System.setProperty("openbone.mcp.port", "0");
+        McpConnectionSettings.save(McpConnectionSettings.path(),new McpConnectionSettings.State(39871,true,""));
+        try {
+            edt(() -> { frame = new EditorFrame(project); frame.setSize(1200,850); frame.showEditor(); return null; });
+            awaitMcpStarted();
+            edt(() -> { url = ((EditorMcpServer)field("mcpServer")).url(); token = (String)field("mcpToken"); return null; });
+            var model = edt(() -> frame.history().state().model());
+            assertEquals(14, model.constraints().size());
+            var constraints = data(call("openbone_query_scene", Map.of("kind", "constraints")));
+            assertEquals(14, constraints.path("total").asInt());
+            String revision = data(call("openbone_get_context", Map.of())).path("revision").asText();
+            Path evidence = Path.of("target/spineboy-image-preview"); Files.createDirectories(evidence);
+            for (String name : List.of("hoverglow-small", "portal-flare1", "portal-flare2")) {
+                var attachment = model.attachments().stream().filter(a -> a.name().equals(name)).findFirst().orElseThrow();
+                var clip = model.animations().stream().filter(c -> c.name().equals(name.startsWith("hover") ? "hoverboard" : "portal"))
+                        .findFirst().orElseThrow();
+                double time = -1;
+                for (int sample = 0; sample <= 120; sample++) {
+                    double t = clip.duration()*sample/120;
+                    var draws = io.github.samlinb.openbone.viewport.VisibleGeometry.evaluate(model,AnimationSampler.world(model,clip.id(),t,false));
+                    if (draws.stream().anyMatch(d -> attachment.source().equals(d.source()) && d.color().a() > .05)) { time = t; break; }
+                }
+                assertTrue(time >= 0, "Animation must actually show " + name);
+                var capture = call("openbone_capture_preview", Map.of("animationId",clip.id().value(),"time",time,
+                        "expectedRevision",revision,"fit",true,"showBones",false,"showGrid",false));
+                assertEquals(revision,data(capture).path("revision").asText());
+                assertEquals(time,data(capture).path("time").asDouble());
+                ImageIO.write(image(capture),"PNG",evidence.resolve(name+".png").toFile());
+                var pixels = edt(() -> ((io.github.samlinb.openbone.viewport.ImageAssets)field("assets")).get(attachment.source()));
+                assertFalse(pixels.missing(),pixels.error());
+            }
+        } finally {
+            if (frame != null) edt(() -> { if (frame.isDisplayable()) { frame.history().markSaved(); invoke("closeRequested"); } return null; });
+            restore("openbone.userState",oldState); restore("openbone.mcp.port",oldPort);
+        }
+    }
+
     void awaitMcpStarted() throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
         while (System.nanoTime() < deadline) {

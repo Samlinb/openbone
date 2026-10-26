@@ -52,6 +52,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
     private final Map<EntityId, TreePath> paths = new HashMap<>();
     private final Map<String, JComponent> named = new LinkedHashMap<>();
     private boolean refreshing, closing;
+    private boolean loadingProject;
+    private Path startupProject;
     private boolean committingField;
     private boolean fieldFailure;
     private boolean errorShowing;
@@ -395,12 +397,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             diagnostics.start();
         }
         changed();
-        if (open != null)
-            guard(() -> {
-                openResolved(open);
-                resetAssets();
-                changed();
-            });
+        startupProject = open;
         try {
             recovery = new RecoveryStore(UserState.root().resolve("recovery"));
             recoveryDocument = document;
@@ -413,6 +410,11 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
 
     public void showEditor() {
         setVisible(true);
+        if (startupProject != null) {
+            Path source = startupProject;
+            startupProject = null;
+            loadProject(source, false, false);
+        }
         viewport.canvas().requestFocusInWindow();
         autoStartMcp();
         SwingUtilities.invokeLater(() -> {
@@ -426,7 +428,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
     }
 
     private void checkpointRecovery() {
-        if (recovery == null || closing || history().isPreviewing())
+        if (recovery == null || closing || loadingProject || history().isPreviewing())
             return;
         try {
             if (!history().isDirty()) {
@@ -714,6 +716,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             }
             public void prepare() {
                 if (closing || !isShowing()) throw new IllegalStateException("Editor is closed or hidden.");
+                if (loadingProject) throw new IllegalStateException("EDITOR_BUSY: project is loading; retry after it finishes.");
                 for (Window window : Window.getWindows())
                     if (window instanceof Dialog dialog && dialog.isModal() && dialog.isShowing())
                         throw new IllegalStateException("EDITOR_BUSY: close the active dialog and retry.");
@@ -2731,20 +2734,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         c.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(m("editorframe.projectFiles"),"json","spine"));
         if (c.showOpenDialog(this) != JFileChooser.APPROVE_OPTION)
             return;
-        // Validate a replacement fully BEFORE asking to save/discard the current
-        // document.
-        guard(() -> {
-            var next = new ProjectDocument(DocumentSnapshot.EMPTY);
-            next.openResolved(c.getSelectedFile().toPath());
-            if (!confirmSave())
-                return;
-            document = next;
-            animation.reset();
-            resetAssets();
-            viewport.camera().reset();
-            changed();
-            if(SpineProjectSource.isNative(c.getSelectedFile().toPath())) { frameImportedProject();showImportReport(); }
-        });
+        loadProject(c.getSelectedFile().toPath(), false, true);
     }
 
     private boolean save(boolean saveAs) {
@@ -2774,12 +2764,29 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         }
     }
 
-    private void openResolved(Path source) throws Exception {
-        document.openResolved(source);
-        if(SpineProjectSource.isNative(source)) {
-            animation.reset();viewport.camera().reset();
-            SwingUtilities.invokeLater(()->{frameImportedProject();showImportReport();});
-        }
+    private void loadProject(Path source, boolean importing, boolean askSave) {
+        if (loadingProject || closing) return;
+        viewportCancel();
+        if (animation.playing()) animation.remoteControl("pause", null, null, null);
+        loadingProject = true;
+        try {
+            // Validate the detached replacement before asking to discard current work.
+            var loaded = ProjectLoadDialog.load(this, source, importing);
+            if (loaded == null || closing || !isDisplayable()) return;
+            if (askSave && !confirmSave()) return;
+            document = loaded.document();
+            assets.replaceWith(loaded.images());
+            animation.reset();
+            viewport.camera().reset();
+            changed();
+            if (importing || SpineProjectSource.isNative(source)) {
+                frameImportedProject();
+                if (importing) { message(m("editorframe.0335")); offerAtlasSplit(source); }
+                showImportReport();
+            }
+        } catch (Exception failed) {
+            if (!closing && isDisplayable()) error(failed);
+        } finally { loadingProject = false; }
     }
 
     private void savePortable() {
@@ -2812,18 +2819,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             Path source = c.getSelectedFile().toPath();
             if (source.getFileName().toString().equals("current.json"))
                 source = ExportPackage.resolve(source);
-            var next = new ProjectDocument(DocumentSnapshot.EMPTY);
-            next.importSkeleton(source);
-            if (!confirmSave())
-                return;
-            document = next;
-            animation.reset();
-            resetAssets();
-            viewport.camera().reset();
-            changed();
-            message(m("editorframe.0335"));
-            offerAtlasSplit(source);
-            showImportReport();
+            loadProject(source, true, true);
         });
     }
 

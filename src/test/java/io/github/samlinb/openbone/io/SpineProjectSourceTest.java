@@ -66,6 +66,11 @@ class SpineProjectSourceTest {
         byte[] original=Files.readAllBytes(project);var doc=new ProjectDocument(DocumentSnapshot.EMPTY);doc.openResolved(project);
         var d=doc.history().state().model();assertEquals(64,d.bones().size());assertEquals(52,d.slots().size());
         assertEquals(11,d.animations().size());assertEquals(80,d.attachments().size());
+        assertEquals(14,d.constraints().size());
+        assertTrue(d.constraints().stream().anyMatch(c -> c.name().equals("aim-rear-arm-transform")));
+        assertTrue(doc.importWarnings().stream().noneMatch(w -> w.contains("invalid configuration")
+                || w.contains("3.8 recovery")), () -> doc.importWarnings().toString());
+        assertTrue(doc.importWarnings().stream().noneMatch(w->w.contains("image unavailable")),()->doc.importWarnings().toString());
         assertTrue(d.attachments().stream().anyMatch(a->a.name().equals("head") && a instanceof MeshAttachment));
         assertTrue(d.attachments().stream().anyMatch(a->a.name().equals("torso") && a instanceof MeshAttachment));
         for(var clip:d.animations()) for(int frame=0;frame<=4;frame++)

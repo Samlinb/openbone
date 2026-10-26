@@ -43,6 +43,8 @@ Successful results contain `content` text and `structuredContent.data`; previews
 
 `kind` supports `bones`, `animations`, `keyframes`, `slots`, `attachments`, and `constraints`. Pages default to 50 records and allow at most 200. Keyframe queries currently return only bone TRS and shear tracks; they do not include deform, constraint, or discrete tracks. Attachment queries return summaries. Bone queries include the parent, setup transform, and inherit mode. All IDs are canonical UUID strings.
 
+Constraint queries include disabled constraints and constraints with zero mix throughout Setup and every animation. These remain part of the editable project without claiming solver output. Active writer overlaps remain unsupported; see [inactive constraint import and validation](PROJECT_DRIVEN_DEVELOPMENT.md#inactive-constraint-import-2026-10-26). The query contract and connection settings are unchanged.
+
 Each batch accepts 1 to 500 sequential operations:
 
 - `create_animation`: `animationId`, `name`. The client generates the new UUID, and later operations in the same batch can reference it.

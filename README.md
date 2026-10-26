@@ -31,6 +31,7 @@ Openbone uses its own editable project format and supports importing and exporti
 
 - **Skeleton JSON**: version field `skeleton.spine`.
 - **Textures**: PNG; individual images can be loaded via `skeleton.images` in the JSON and attachment paths.
+- **3.8 editor images**: PNGs readable by the viewport, including palette images and PNGs with `cHRM`, `gAMA` or ICC metadata, can be imported and saved as portable projects with their original bytes. Unreadable images retain their links and report the decode error. Runtime export still applies its stricter PNG rules and may require a converted copy.
 - **Atlas**: reads a `.atlas` file with the same name and directory as the JSON, e.g. `character.json` pairs with `character.atlas`; rotation and whitespace-stripping information are supported with limitations.
 - **Export asset pack**: contains `skeleton.json`, `skeleton.atlas` and PNG images, ready for runtimes that match the format.
 
@@ -44,7 +45,7 @@ Openbone uses its own editable project format and supports importing and exporti
 | Colors & blending | Slots and texture attachments accept white only; blend modes limited to `normal` / `additive`; color animation is not supported |
 | Separate X / Y tracks | Keyframe times of grouped separate X / Y tracks must match |
 | Deform | Mesh deform supported; deform for path and clipping attachments is not implemented; weighted clipping is not supported |
-| Constraints | Subject to solve-order, dependency and numeric-range limits; constraints dependent on skin enabling and global physics timelines are not supported |
+| Constraints | Subject to solve-order, dependency and numeric-range limits; overlapping active writers are unsupported. Disabled constraints and constraints whose mix stays zero in Setup and every animation are preserved. Constraints dependent on skin enabling and global physics timelines are not supported |
 | Atlas | Requires PNG, `RGBA8888`, non-premultiplied alpha, `Nearest` filtering and no duplicates; rotation limited to 0° / 90°; region `index` must be `-1`; custom fields are not supported |
 | Export | The skeleton must have exactly one root bone; project data must also pass runtime float32 range checks |
 

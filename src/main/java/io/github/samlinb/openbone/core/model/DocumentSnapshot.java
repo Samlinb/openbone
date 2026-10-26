@@ -210,21 +210,30 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                             throw new IllegalArgumentException(m("documentsnapshot.0020"));
         }
         constraints = constraints.stream().sorted(Comparator.comparingInt(Constraint::order)).toList();
-        Set<EntityId> writers = new HashSet<>();
+        // A disabled or permanently zero-mix constraint has no solver output.
+        // Include animation envelopes: Setup mix=0 alone does not prove inactivity.
+        List<Constraint> solving = new ArrayList<>();
         for (var c : constraints)
-            for (var id : c.boneIds())
-                if (!writers.add(id))
-                    throw new IllegalArgumentException(m("documentsnapshot.0021"));
-        for (var reader : constraints)
-            for (var writer : constraints)
+            if (mayWrite(c, animations))
+                solving.add(c);
+        Map<EntityId, Constraint> writers = new HashMap<>();
+        for (var c : solving)
+            for (var id : c.boneIds()) {
+                var prior = writers.putIfAbsent(id, c);
+                if (prior != null)
+                    throw new IllegalArgumentException(m("documentsnapshot.0021", byBone.get(id).name(),
+                            prior.name(), c.name()));
+            }
+        for (var reader : solving)
+            for (var writer : solving)
                 if (reader != writer && writer.order() > reader.order())
                     for (var id : writer.boneIds())
                         if (descends(byBone, reader.targetBone(slots), id) || reader.boneIds().stream()
                                 .anyMatch(prior -> !prior.equals(id) && descends(byBone, prior, id)))
                             throw new IllegalArgumentException(m("documentsnapshot.0022"));
-        for (var reader : constraints)
+        for (var reader : solving)
             if (reader instanceof TransformConstraint t && t.local())
-                for (var writer : constraints)
+                for (var writer : solving)
                     if ((writer instanceof TransformConstraint w && !w.local() || writer instanceof PathConstraint
                             || writer instanceof PhysicsConstraint) && writer.boneIds().contains(reader.targetId()))
                         throw new IllegalArgumentException(m("documentsnapshot.0023"));
@@ -282,6 +291,33 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             if (id.equals(ancestor))
                 return true;
             id = bones.get(id).parentId();
+        }
+        return false;
+    }
+
+    private static boolean writes(Constraint c) {
+        if (!c.enabled())
+            return false;
+        if (c instanceof IkConstraint ik)
+            return ik.mix() != 0;
+        if (c instanceof TransformConstraint t)
+            return !t.inactive();
+        if (c instanceof PathConstraint p)
+            return !p.inactive();
+        return ((PhysicsConstraint) c).mix() != 0;
+    }
+
+    private static boolean mayWrite(Constraint c, List<AnimationClip> animations) {
+        if (!c.enabled())
+            return false;
+        if (writes(c))
+            return true;
+        for (var clip : animations) {
+            for (var track : clip.constraintTracks())
+                if (track.constraintId().equals(c.id()))
+                    track.validate(c);
+            if (writes(ConstraintTimeline.envelope(clip, c)))
+                return true;
         }
         return false;
     }

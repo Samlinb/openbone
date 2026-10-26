@@ -66,6 +66,13 @@ public final class ImageAssets {
         cache.clear();
     }
 
+    /** Publish a detached worker cache after loading finishes; caller owns both caches. */
+    public void replaceWith(ImageAssets prepared) {
+        base = prepared.base;
+        cache.clear();
+        cache.putAll(prepared.cache);
+    }
+
     public void retain(Set<Path> paths) {
         cache.keySet().retainAll(paths);
     }

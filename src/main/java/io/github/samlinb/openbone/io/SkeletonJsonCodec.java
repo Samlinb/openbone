@@ -474,13 +474,16 @@ public final class SkeletonJsonCodec {
                         try {
                             pixels = importedImages.get(png);
                             if(pixels==null) {
+                                // Legacy editor import uses the viewport decoder, not runtime export's
+                                // color-management restrictions. Keep the original linked image bytes.
                                 pixels=io.github.samlinb.openbone.viewport.ImageAssets.decodePng(
-                                        legacy ? RuntimePng.readCompatible(png) : RuntimePng.read(png));
+                                        legacy ? ResourcePaths.png(png) : RuntimePng.read(png));
                                 importedImages.put(png,pixels);
                             }
                         } catch (IOException invalidImage) {
                             if (!legacy) throw invalidImage;
-                            warnings.add(p + ": image unavailable; resource link retained: " + png);
+                            warnings.add(p + ": image unavailable; resource link retained: " + png
+                                    + "; reason: " + invalidImage.getMessage());
                         }
                         var id = EntityId.create();
                         attachmentIds.put(skinName + "\0" + slot + "\0" + name, id);

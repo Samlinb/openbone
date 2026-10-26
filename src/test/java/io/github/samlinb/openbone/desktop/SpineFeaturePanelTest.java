@@ -34,6 +34,7 @@ class SpineFeaturePanelTest {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 var frame = new EditorFrame(path);
+                frame.showEditor();
                 try {
                     frame.history().select(Selection.of(bone.id())); frame.changed();
                     input(frame,"property.shearX","25"); assertEquals(25,frame.history().state().model().bone(bone.id()).local().shearX());
