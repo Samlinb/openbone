@@ -594,14 +594,14 @@ public final class EditorViewport extends ApplicationAdapter {
                     .println("GL viewport logical=" + w + "x" + h + " physical=" + pw + "x" + ph + " device=" + device);
         }
         Gdx.gl.glViewport(0, 0, pw, ph);
-        Gdx.gl.glClearColor(32 / 255f, 40 / 255f, 48 / 255f, 1);
+        Gdx.gl.glClearColor(25 / 255f, 31 / 255f, 39 / 255f, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         var projection = new Matrix4().setToOrtho(0, w, h, 0, -1, 1);
         shapes.setProjectionMatrix(projection);
         batch.setProjectionMatrix(projection);
         if(showGrid) {
         shapes.begin(ShapeRenderer.ShapeType.Line);
-        shapes.setColor(.18f, .22f, .26f, 1);
+        shapes.setColor(44 / 255f, 53 / 255f, 64 / 255f, 1);
         double step = 50 * camera.zoom();
         while (step < 25)
             step *= 2;
@@ -613,7 +613,7 @@ public final class EditorViewport extends ApplicationAdapter {
             line(new Vec2(x, 0), new Vec2(x, h));
         for (double y = gy; y < h; y += step)
             line(new Vec2(0, y), new Vec2(w, y));
-        shapes.setColor(.3f, .4f, .5f, 1);
+        shapes.setColor(61 / 255f, 74 / 255f, 87 / 255f, 1);
         line(new Vec2(zero.x(), 0), new Vec2(zero.x(), h));
         line(new Vec2(0, zero.y()), new Vec2(w, zero.y()));
         shapes.end();
@@ -648,7 +648,7 @@ public final class EditorViewport extends ApplicationAdapter {
             boolean active = Objects.equals(selected, b.id())
                     || d.slots().stream().anyMatch(s -> Objects.equals(selected, s.id()) && s.boneId().equals(b.id()));
             if (active)
-                shapes.setColor(1, .8f, .25f, 1);
+                shapes.setColor(125 / 255f, 217 / 255f, 188 / 255f, 1);
             else if (!b.color().equals(Rgba.WHITE))
                 shapes.setColor(f(b.color().r()), f(b.color().g()), f(b.color().b()), f(b.color().a()));
             else
@@ -675,13 +675,13 @@ public final class EditorViewport extends ApplicationAdapter {
                     rid = s.activeAttachmentId();
             var rw = pose.regions().get(rid);
             if (rw != null) {
-                shapes.setColor(1, .8f, .25f, 1);
+                shapes.setColor(125 / 255f, 217 / 255f, 188 / 255f, 1);
                 for (int i = 0; i < 4; i++)
                     line(screen(rw.vertices().get(i)), screen(rw.vertices().get((i + 1) % 4)));
             }
             var mw = pose.meshes().get(rid);
             if (mw != null) {
-                shapes.setColor(1, .8f, .25f, 1);
+                shapes.setColor(125 / 255f, 217 / 255f, 188 / 255f, 1);
                 for (int i = 0; i < mw.triangles().size(); i += 3)
                     for (int j = 0; j < 3; j++)
                         line(screen(mw.vertices().get(mw.triangles().get(i + j))),
@@ -748,7 +748,7 @@ public final class EditorViewport extends ApplicationAdapter {
             }
             Vec2 o = origin(d, selected);
             if (tool == Tool.ROTATE) {
-                shapes.setColor(1, .8f, .25f, 1);
+                shapes.setColor(125 / 255f, 217 / 255f, 188 / 255f, 1);
                 shapes.circle(f(o.x()), f(o.y()), 50, 64);
             } else if (tool == Tool.MOVE || tool == Tool.SCALE) {
                 for (int i = 0; i < 2; i++) {
@@ -763,7 +763,7 @@ public final class EditorViewport extends ApplicationAdapter {
             }
         }
         if (createEnd != null) {
-            shapes.setColor(1, .8f, .25f, 1);
+            shapes.setColor(125 / 255f, 217 / 255f, 188 / 255f, 1);
             line(press, createEnd);
         }
         shapes.end();

@@ -103,3 +103,7 @@ try {
         else { [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process') }
     }
 }
+# The negative CLI test intentionally returns 2. Explicitly report overall success
+# to pwsh -Command and the GitHub Actions LASTEXITCODE wrapper, after cleanup only.
+# An exception above must still fail the step; never put this in finally.
+exit 0

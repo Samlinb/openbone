@@ -12,7 +12,10 @@ import io.github.samlinb.openbone.io.AtomicProjectFile;
  */
 public final class WorkspaceLayout {
     public record State(int version, int x, int y, int width, int height, int hierarchy, int properties,
-            boolean maximized) {
+            boolean maximized, int timeline, boolean curves) {
+        public State(int version,int x,int y,int width,int height,int hierarchy,int properties,boolean maximized) {
+            this(version,x,y,width,height,hierarchy,properties,maximized,270,false);
+        }
     }
 
     private WorkspaceLayout() {

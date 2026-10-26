@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>io.github.samlinb.openbone</groupId>
   <artifactId>openbone</artifactId>
-  <version>0.2.2</version>
+  <version>1.0.0</version>
   <name>Openbone</name>
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
@@ -11,6 +11,7 @@
     <project.build.outputTimestamp>2026-10-23T00:00:00Z</project.build.outputTimestamp>
   </properties>
   <dependencies>
+    <dependency><groupId>com.formdev</groupId><artifactId>flatlaf</artifactId><version>3.7</version></dependency>
     <dependency><groupId>com.badlogicgames.gdx</groupId><artifactId>gdx</artifactId><version>1.12.1</version></dependency>
     <dependency><groupId>com.badlogicgames.gdx</groupId><artifactId>gdx-backend-lwjgl</artifactId><version>1.12.1</version>
       <exclusions>

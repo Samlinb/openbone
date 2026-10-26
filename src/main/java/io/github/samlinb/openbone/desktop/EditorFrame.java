@@ -27,6 +27,7 @@ import static io.github.samlinb.openbone.i18n.M.m;
  * EDT.
  */
 public final class EditorFrame extends JFrame implements EditorViewport.Host {
+    static { WorkspaceTheme.installTheme(); }
     private ProjectDocument document = new ProjectDocument(DocumentSnapshot.EMPTY);
     private final ImageAssets assets = new ImageAssets();
     private final EditorViewport viewport;
@@ -39,8 +40,15 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
     private McpControlDialog mcpControl;
     private long mcpLifecycle;
     private final JTree tree = new JTree();
+    private final JTextField hierarchySearch = new JTextField();
     private final JPanel properties = new PropertyPanel();
     private final JLabel status = new JLabel(" ");
+    private final JButton mcpStatus = new JButton();
+    private final JLabel sceneCaption = new JLabel();
+    private JSplitPane timelineSplit;
+    private int timelineHeight = WorkspaceTheme.scale(270);
+    private int initialPropertyWidth = WorkspaceTheme.scale(300);
+    private boolean timelineVisible;
     private final Map<EntityId, TreePath> paths = new HashMap<>();
     private final Map<String, JComponent> named = new LinkedHashMap<>();
     private boolean refreshing, closing;
@@ -171,8 +179,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         var screen = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice()
                 .getDefaultConfiguration().getBounds();
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
-        setMinimumSize(new Dimension(Math.min(1000, screen.width - 40), Math.min(680, screen.height - 60)));
-        setSize(Math.min(1360, screen.width - 40), Math.min(860, screen.height - 60));
+        setMinimumSize(new Dimension(Math.min(WorkspaceTheme.scale(1000), screen.width - 40), Math.min(WorkspaceTheme.scale(680), screen.height - 60)));
+        setSize(Math.min(WorkspaceTheme.scale(1360), screen.width - 40), Math.min(WorkspaceTheme.scale(860), screen.height - 60));
         setLocationRelativeTo(null);
         undo = action(m("editorframe.0001"), () -> {
             if (!commitFocusedField())
@@ -226,11 +234,17 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         });
         setJMenuBar(menus());
         JPanel main = new JPanel(new BorderLayout());
-        main.add(toolbar(), BorderLayout.NORTH);
+        main.add(commandBar(), BorderLayout.NORTH);
         tree.setName("hierarchy");
         tree.setRootVisible(true);
         tree.setShowsRootHandles(true);
-        tree.setRowHeight(25);
+        tree.setRowHeight(WorkspaceTheme.scale(29));
+        tree.setBorder(BorderFactory.createEmptyBorder(8, 6, 8, 6));
+        var renderer = new DefaultTreeCellRenderer();
+        renderer.setLeafIcon(new WorkspaceIcon(WorkspaceIcon.Kind.BONE));
+        renderer.setOpenIcon(new WorkspaceIcon(WorkspaceIcon.Kind.LAYERS));
+        renderer.setClosedIcon(new WorkspaceIcon(WorkspaceIcon.Kind.LAYERS));
+        tree.setCellRenderer(renderer);
         tree.getSelectionModel().setSelectionMode(TreeSelectionModel.SINGLE_TREE_SELECTION);
         tree.addTreeSelectionListener(e -> {
             if (refreshing)
@@ -247,12 +261,25 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         props.setMinimumSize(new Dimension(285, 100));
         props.setPreferredSize(new Dimension(300, 600));
         JPanel center = new JPanel(new BorderLayout());
+        center.add(viewportHeader(), BorderLayout.NORTH);
+        center.add(toolRail(), BorderLayout.WEST);
         center.add(viewport.canvas());
         JLabel hint = new JLabel(m("editorframe.0003"));
-        hint.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
+        hint.setForeground(WorkspaceTheme.MUTED);
+        hint.setBorder(BorderFactory.createEmptyBorder(7, 12, 7, 12));
         center.add(hint, BorderLayout.SOUTH);
-        JSplitPane right = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, center, props);
+        JPanel inspector = new JPanel(new BorderLayout());
+        inspector.add(WorkspaceTheme.heading(m("workspace.properties")), BorderLayout.NORTH);
+        props.setBorder(BorderFactory.createEmptyBorder());
+        inspector.add(props);
+        inspector.setMinimumSize(WorkspaceTheme.size(285,100));
+        JSplitPane right = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, center, inspector);
         right.setResizeWeight(1);
+        right.addComponentListener(new ComponentAdapter(){private boolean positioned;public void componentResized(ComponentEvent e){
+            int max=right.getWidth()-inspector.getMinimumSize().width-right.getDividerSize();
+            if(!positioned&&right.getWidth()>0){positioned=true;right.setDividerLocation(Math.max(150,right.getWidth()-initialPropertyWidth-right.getDividerSize()));}
+            else if(max>0&&right.getDividerLocation()>max)right.setDividerLocation(max);
+        }});
         right.setDividerLocation(Math.max(300, getWidth() - 220 - 310));
         JScrollPane hierarchy = new JScrollPane(tree);
         hierarchy.setPreferredSize(new Dimension(220, 600));
@@ -261,15 +288,54 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             if(!commitFocusedField()) return false;viewportCancel();return true;
         },()->{assets.reload();changed();},this::error,id->{history().select(Selection.of(id));changed();});
         navigation.setName("workspace.navigation");
-        navigation.addTab(m("images.hierarchy"),hierarchy);navigation.addTab(m("images.title"),imageResources);
-        navigation.setPreferredSize(new Dimension(240,600));navigation.setMinimumSize(new Dimension(160,100));
+        JPanel outline = new JPanel(new BorderLayout());
+        var searchRow=new JPanel(new BorderLayout());searchRow.setBorder(BorderFactory.createEmptyBorder(8,8,8,8));
+        hierarchySearch.setName("workspace.search");named.put(hierarchySearch.getName(),hierarchySearch);
+        hierarchySearch.putClientProperty("JTextField.placeholderText",m("workspace.search"));
+        hierarchySearch.putClientProperty("JTextField.leadingIcon",new com.formdev.flatlaf.icons.FlatSearchIcon());
+        hierarchySearch.putClientProperty("JTextField.showClearButton",true);
+        hierarchySearch.getDocument().addDocumentListener(new DocumentListener(){
+            public void insertUpdate(DocumentEvent e){filter();}public void removeUpdate(DocumentEvent e){filter();}public void changedUpdate(DocumentEvent e){filter();}
+            private void filter(){if(!refreshing){refreshing=true;try{rebuildTree();}finally{refreshing=false;}}}
+        });
+        searchRow.add(hierarchySearch);outline.add(searchRow,BorderLayout.NORTH);
+        hierarchy.setBorder(BorderFactory.createEmptyBorder());
+        var animationBrowser=animation.navigator();
+        hierarchy.setMinimumSize(WorkspaceTheme.size(100,80));animationBrowser.setMinimumSize(WorkspaceTheme.size(100,120));
+        var browserSplit=new JSplitPane(JSplitPane.VERTICAL_SPLIT,hierarchy,animationBrowser);
+        browserSplit.setBorder(BorderFactory.createEmptyBorder());browserSplit.setResizeWeight(.7);browserSplit.setContinuousLayout(true);
+        browserSplit.addComponentListener(new ComponentAdapter(){private boolean positioned;
+            public void componentResized(ComponentEvent e){if(!positioned&&browserSplit.getHeight()>0){positioned=true;browserSplit.setDividerLocation(.65);}}
+        });
+        outline.add(browserSplit);
+        navigation.addTab(m("images.hierarchy"),outline);navigation.addTab(m("images.title"),imageResources);
+        navigation.setPreferredSize(WorkspaceTheme.size(240,600));navigation.setMinimumSize(WorkspaceTheme.size(160,280));
         JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, navigation, right);
-        split.setDividerLocation(220);
+        split.setDividerLocation(WorkspaceTheme.scale(220));
         split.setResizeWeight(0);
         hierarchySplit = split;
         propertySplit = right;
+        timelineSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, split, animation);
+        timelineSplit.setName("workspace.timelineSplit");
+        timelineSplit.setResizeWeight(1);
+        timelineSplit.setBorder(BorderFactory.createEmptyBorder());
+        timelineSplit.setContinuousLayout(true);
+        named.put(timelineSplit.getName(),timelineSplit);
+        timelineSplit.addPropertyChangeListener(JSplitPane.DIVIDER_LOCATION_PROPERTY, e -> {
+            if (timelineVisible && animation.isShowing() && timelineSplit.getHeight()>0) {
+                int minimumTop=WorkspaceTheme.scale(280);
+                if(timelineSplit.getDividerLocation()<minimumTop){timelineSplit.setDividerLocation(minimumTop);return;}
+                timelineHeight=Math.max(180,timelineSplit.getHeight()-timelineSplit.getDividerLocation()-timelineSplit.getDividerSize());
+            }
+        });
+        split.setBorder(BorderFactory.createEmptyBorder()); right.setBorder(BorderFactory.createEmptyBorder());
+        split.setContinuousLayout(true); right.setContinuousLayout(true);
         try {
-            WorkspaceLayout.restore(this, split, right, WorkspaceLayout.read(UserState.root().resolve("layout.json")));
+            var layout=WorkspaceLayout.read(UserState.root().resolve("layout.json"));
+            WorkspaceLayout.restore(this, split, right, layout);
+            initialPropertyWidth=Math.max(WorkspaceTheme.scale(285),layout.properties());
+            timelineHeight=layout.timeline()>0?layout.timeline():WorkspaceTheme.scale(270);
+            animation.curvesVisible(layout.curves());
         } catch (Exception absent) {
             System.out.println("Layout defaults: " + absent.getMessage());
         }
@@ -284,11 +350,15 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             }
         });
         JPanel workspace = new JPanel(new BorderLayout());
-        workspace.add(split);
-        workspace.add(animation, BorderLayout.SOUTH);
+        workspace.add(timelineSplit);
         main.add(workspace, BorderLayout.CENTER);
         status.setBorder(BorderFactory.createEmptyBorder(7, 12, 7, 12));
-        main.add(status, BorderLayout.SOUTH);
+        status.setForeground(WorkspaceTheme.MUTED);
+        JPanel footer=new JPanel(new BorderLayout());footer.setBackground(WorkspaceTheme.CHROME);
+        footer.setBorder(WorkspaceTheme.line(1,0,0,0));footer.add(status);
+        mcpStatus.setName("workspace.mcp");named.put(mcpStatus.getName(),mcpStatus);
+        mcpStatus.addActionListener(e->showMcpConnection());footer.add(mcpStatus,BorderLayout.EAST);
+        main.add(footer, BorderLayout.SOUTH);
         setContentPane(main);
         bind("control Z", undo);
         bind("control Y", redo);
@@ -628,6 +698,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         mcpLifecycle++;
         if (mcpServer != null) { mcpServer.close(); mcpServer = null; mcpToken = null; }
         message(m("mcp.stopped"));
+        refreshMcpStatus();
     }
 
     private void startMcp(int port, String token) {
@@ -688,6 +759,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         try {
             mcpServer = new EditorMcpServer(port, token, tools);
             mcpToken = token;
+            refreshMcpStatus();
             message(m("mcp.started") + " " + mcpServer.url());
         } catch (java.net.BindException occupied) {
             throw new IllegalStateException(m("mcp.portInUse") + " " + port, occupied);
@@ -742,13 +814,26 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         m.add(item);
     }
 
-    private JToolBar toolbar() {
+    private JPanel commandBar() {
+        JPanel header=new JPanel(new BorderLayout());
         JToolBar bar = new JToolBar();
         bar.setFloatable(false);
+        bar.setBorder(BorderFactory.createCompoundBorder(WorkspaceTheme.line(1,0,1,0),BorderFactory.createEmptyBorder(5,10,5,10)));
+        bar.add(animation.modeSelector());bar.addSeparator();
         button(bar, m("animationpanel.0007"), this::newProject);
         button(bar, m("editorframe.0004"), this::openProject);
         button(bar, m("editorframe.0005"), () -> save(false));
         bar.addSeparator();
+        var undoButton=new JButton(undo);undoButton.setIcon(new WorkspaceIcon(WorkspaceIcon.Kind.UNDO));bar.add(undoButton);
+        var redoButton=new JButton(redo);redoButton.setIcon(new WorkspaceIcon(WorkspaceIcon.Kind.REDO));bar.add(redoButton);
+        bar.add(Box.createHorizontalGlue());
+        button(bar, m("editorframe.0063"), this::importImage);
+        header.add(bar);return header;
+    }
+
+    private JToolBar toolRail() {
+        JToolBar bar=new JToolBar(JToolBar.VERTICAL);bar.setFloatable(false);
+        bar.setBorder(BorderFactory.createCompoundBorder(WorkspaceTheme.line(0,0,0,1),BorderFactory.createEmptyBorder(10,5,10,5)));
         ButtonGroup group = new ButtonGroup();
         String[] labels = { m("editorframe.0055"), m("editorframe.0056"), m("editorframe.0057"), m("editorframe.0058"),
                 m("editorframe.0059") };
@@ -756,6 +841,9 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         for (int i = 0; i < values.length; i++) {
             var value = values[i];
             JToggleButton b = new JToggleButton(labels[i]);
+            b.setIcon(new WorkspaceIcon(WorkspaceIcon.Kind.valueOf(value.name().equals("CREATE")?"BONE":value.name())));
+            b.setToolTipText(labels[i]);b.setText("");
+            b.setPreferredSize(WorkspaceTheme.size(34,34));b.setMaximumSize(WorkspaceTheme.size(34,34));
             b.setName("tool." + value);
             named.put(b.getName(), b);
             group.add(b);
@@ -763,12 +851,19 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             b.addActionListener(e -> viewport.tool(value));
             bar.add(b);
         }
+        return bar;
+    }
+
+    private JPanel viewportHeader() {
+        var header=WorkspaceTheme.heading(m("workspace.scene"));
+        header.removeAll();sceneCaption.setForeground(WorkspaceTheme.MUTED);header.add(sceneCaption);
+        var controls=new JPanel(new FlowLayout(FlowLayout.RIGHT,6,0));
         JComboBox<String> space = new JComboBox<>(new String[] { m("editorframe.0060"), m("editorframe.0061") });
         space.setMaximumSize(new Dimension(115, 30));
         space.setName("space");
         named.put("space", space);
         space.addActionListener(e -> viewport.space(space.getSelectedIndex() == 0 ? Space.LOCAL : Space.WORLD));
-        bar.add(space);
+        controls.add(space);
         JComboBox<String> zoom = new JComboBox<>(new String[] { "30%", "100%", "140%", "400%" });
         zoom.setSelectedIndex(1);
         zoom.setMaximumSize(new Dimension(78, 30));
@@ -780,19 +875,20 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                     viewport.canvas().getWidth(), viewport.canvas().getHeight());
             changed();
         });
-        bar.add(zoom);
-        bar.addSeparator();
-        button(bar, m("editorframe.0062"), this::createSlot);
-        button(bar, m("editorframe.0063"), this::importImage);
-        button(bar, m("editorframe.0064"), this::reparent);
-        bar.addSeparator();
-        bar.add(new JButton(undo));
-        bar.add(new JButton(redo));
-        return bar;
+        controls.add(zoom);
+        header.add(controls,BorderLayout.EAST);return header;
+    }
+
+    private void refreshMcpStatus() {
+        mcpStatus.setText("MCP  ·  "+m(mcpServer==null?"mcp.stopped":"mcp.running")+"  ·  "+m("mcp.connection"));
+        mcpStatus.setForeground(mcpServer==null?WorkspaceTheme.MUTED:WorkspaceTheme.ACCENT);
     }
 
     private void button(JToolBar bar, String label, Runnable fn) {
         var b = new JButton(action(label, fn));
+        if(label.equals(m("animationpanel.0007")))b.setIcon(new WorkspaceIcon(WorkspaceIcon.Kind.NEW));
+        else if(label.equals(m("editorframe.0004")))b.setIcon(new WorkspaceIcon(WorkspaceIcon.Kind.OPEN));
+        else if(label.equals(m("editorframe.0005")))b.setIcon(new WorkspaceIcon(WorkspaceIcon.Kind.SAVE));
         b.setName(label);
         named.put(label, b);
         bar.add(b);
@@ -878,11 +974,14 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         try {
             setTitle("Openbone — " + document.path().map(p -> p.getFileName().toString()).orElse(m("editorframe.0065"))
                     + (history().isDirty() ? " *" : ""));
+        sceneCaption.setText(m("workspace.scene")+" / "+m(animation.animate()?"workspace.animate":"workspace.setup"));
+            refreshMcpStatus();
             undo.setEnabled(history().undoCount() > 0);
             redo.setEnabled(history().redoCount() > 0);
             rebuildTree();
             rebuildProperties();
             animation.refresh();
+            updateTimelineLayout();
             if(imageResources!=null) imageResources.refresh();
             long missing = model().attachments().stream().filter(a -> a.source() != null)
                     .map(a -> assets.get(a.source())).filter(ImageAssets.Image::missing).count();
@@ -895,6 +994,18 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         } finally {
             refreshing = false;
         }
+    }
+
+    private void updateTimelineLayout() {
+        if(timelineSplit==null)return;
+        boolean visible=animation.animate();
+        if(visible==timelineVisible && animation.isVisible()==visible)return;
+        timelineVisible=false;
+        animation.setVisible(visible);
+        timelineSplit.setDividerSize(visible?5:0);
+        if(visible)timelineSplit.setDividerLocation(Math.max(WorkspaceTheme.scale(280),timelineSplit.getHeight()-timelineHeight-5));
+        timelineVisible=visible;
+        timelineSplit.revalidate();
     }
 
     @Override
@@ -978,7 +1089,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                     double[] values = { t.x(), t.y(), t.rotation(), t.scaleX(), t.scaleY(), t.shearX(), t.shearY() };
                     for (int i = 0; i < keys.length; i++)
                         if (named.get("property." + keys[i]) instanceof JTextField f && !f.isFocusOwner())
-                            f.setText(number(values[i]));
+                            f.setText(displayNumber(values[i]));
                 } catch (IllegalArgumentException ignored) {
                 }
         } else
@@ -1026,15 +1137,27 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             nodes.put(c.id(), n);
             root.add(n);
         }
+        String query=hierarchySearch.getText().strip().toLowerCase(Locale.ROOT);
+        if(!query.isEmpty())filterNodes(root,query);
         tree.setModel(new DefaultTreeModel(root));
         for (var e : nodes.entrySet())
-            paths.put(e.getKey(), new TreePath(e.getValue().getPath()));
+            if(e.getValue().getRoot()==root)paths.put(e.getKey(), new TreePath(e.getValue().getPath()));
         for (int i = 0; i < tree.getRowCount(); i++)
             tree.expandRow(i);
         if (selected() != null) {
             tree.setSelectionPath(paths.get(selected()));
             tree.scrollPathToVisible(paths.get(selected()));
         }
+    }
+
+    private boolean filterNodes(DefaultMutableTreeNode node,String query) {
+        boolean matches=node.toString().toLowerCase(Locale.ROOT).contains(query);
+        if(matches)return true;
+        for(int i=node.getChildCount()-1;i>=0;i--){
+            var child=(DefaultMutableTreeNode)node.getChildAt(i);
+            if(!filterNodes(child,query))node.remove(i);
+        }
+        return node.getChildCount()>0;
     }
 
     private void rebuildProperties() {
@@ -1086,6 +1209,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             field("name", m("editorframe.0096"), b.name(),
                     value -> edit(m("editorframe.0097"), d -> ModelEdits.editBone(d, id, v -> v.withName(value))));
             transformFields(id);
+            section(m("workspace.boneSettings"));
             field("length", m("editorframe.0098"), number(b.length()), value -> {
                 double v = parse(value);
                 edit(m("editorframe.0099"),
@@ -2178,6 +2302,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                 return;
             }
         }
+        section(m("workspace.transform"));
         text(viewport.space() == Space.LOCAL ? m("editorframe.0290") : m("editorframe.0291"));
         Transform initial = t;
         double[] values = { t.x(), t.y(), t.rotation(), t.scaleX(), t.scaleY(), t.shearX(), t.shearY() };
@@ -2189,8 +2314,9 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             if (refreshing || propertyRevision != revision)
                 return;
             guard(() -> {
-                Transform value = new Transform(parse(fields[0].getText()), parse(fields[1].getText()),
-                        parse(fields[2].getText()), parse(fields[3].getText()), parse(fields[4].getText()), parse(fields[5].getText()), parse(fields[6].getText()));
+                double[] edited=new double[values.length];
+                for(int i=0;i<edited.length;i++)edited[i]=fields[i].getText().equals(displayNumber(values[i]))?values[i]:parse(fields[i].getText());
+                Transform value = new Transform(edited[0],edited[1],edited[2],edited[3],edited[4],edited[5],edited[6]);
                 if (value.equals(initial))
                     return;
                 Set<Channel> channels = EnumSet.noneOf(Channel.class);
@@ -2206,14 +2332,23 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             });
         };
         for (int i = 0; i < fields.length; i++) {
-            var f = new JTextField(number(values[i]));
+            var f = new JTextField(displayNumber(values[i]));
             fields[i] = f;
             f.setEnabled(!animation.playing());
             f.setName("property." + keys[i]);
             named.put(f.getName(), f);
-            row(labels[i], f);
+            double original=values[i];
+            f.setToolTipText(labels[i]+" = "+number(original));f.setHorizontalAlignment(JTextField.RIGHT);
             onCommit(f, revision, apply);
+            f.addFocusListener(new FocusAdapter(){
+                public void focusGained(FocusEvent e){if(f.getText().equals(displayNumber(original)))f.setText(number(original));}
+                public void focusLost(FocusEvent e){if(f.getText().equals(number(original)))f.setText(displayNumber(original));}
+            });
         }
+        pairedRow(m("workspace.position"),fields[0],"X",fields[1],"Y");
+        row(labels[2],fields[2]);
+        pairedRow(m("workspace.scale"),fields[3],"X",fields[4],"Y");
+        pairedRow(m("workspace.shear"),fields[5],"X",fields[6],"Y");
     }
 
     private void field(String key, String label, String value, Consumer<String> apply) {
@@ -2263,6 +2398,10 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         return Double.toString(v);
     }
 
+    private static String displayNumber(double value) {
+        return java.math.BigDecimal.valueOf(value).round(new java.math.MathContext(8)).stripTrailingZeros().toString();
+    }
+
     private static double parse(String v) {
         double n;
         try {
@@ -2277,10 +2416,25 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
 
     private void title(String value) {
         JLabel label = new JLabel(value);
-        label.setFont(label.getFont().deriveFont(Font.BOLD, 17));
+        label.setFont(label.getFont().deriveFont(Font.BOLD, (float)WorkspaceTheme.scale(16)));
+        label.setForeground(WorkspaceTheme.ACCENT);
         label.setAlignmentX(0);
         properties.add(label);
         properties.add(Box.createVerticalStrut(12));
+    }
+
+    private void section(String value) {
+        JPanel heading=WorkspaceTheme.heading(value);heading.setAlignmentX(0);
+        heading.setMaximumSize(new Dimension(Integer.MAX_VALUE,WorkspaceTheme.scale(38)));
+        properties.add(Box.createVerticalStrut(5));properties.add(heading);
+        properties.add(Box.createVerticalStrut(8));
+    }
+
+    private void pairedRow(String label,JTextField a,String aLabel,JTextField b,String bLabel) {
+        var pair=new JPanel(new GridLayout(1,2,6,0));
+        a.putClientProperty("JTextField.leadingComponent",new JLabel(aLabel));
+        b.putClientProperty("JTextField.leadingComponent",new JLabel(bLabel));
+        pair.add(a);pair.add(b);row(label,pair);
     }
 
     private void text(String value) {
@@ -2290,6 +2444,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         area.setLineWrap(true);
         area.setWrapStyleWord(true);
         area.setOpaque(false);
+        area.setForeground(WorkspaceTheme.MUTED);
         area.setAlignmentX(0);
         area.setMaximumSize(new Dimension(Integer.MAX_VALUE, 65));
         properties.add(area);
@@ -2298,10 +2453,11 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
 
     private void row(String label, JComponent input) {
         JPanel row = new JPanel(new BorderLayout(8, 0));
-        row.add(new JLabel(label), BorderLayout.WEST);
+        var caption=new JLabel(label);caption.setForeground(WorkspaceTheme.MUTED);
+        caption.setPreferredSize(WorkspaceTheme.size(65,28));row.add(caption, BorderLayout.WEST);
         row.add(input);
-        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 30));
-        row.setPreferredSize(new Dimension(260, 30));
+        row.setMaximumSize(new Dimension(Integer.MAX_VALUE, WorkspaceTheme.scale(30)));
+        row.setPreferredSize(WorkspaceTheme.size(260, 30));
         row.setAlignmentX(0);
         properties.add(row);
         properties.add(Box.createVerticalStrut(6));
@@ -2756,7 +2912,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             WorkspaceLayout.save(UserState.root().resolve("layout.json"),
                     new WorkspaceLayout.State(1, b.x, b.y, b.width, b.height, hierarchySplit.getDividerLocation(),
                             Math.max(285, propertySplit.getWidth() - propertySplit.getDividerLocation()),
-                            (getExtendedState() & MAXIMIZED_BOTH) != 0));
+                            (getExtendedState() & MAXIMIZED_BOTH) != 0,timelineHeight,animation.curvesVisible()));
         } catch (Exception failed) {
             System.err.println("Layout save: " + failed);
         }

@@ -47,6 +47,14 @@ final class AnimationPanel extends JPanel {
     }
 
     private final JComboBox<ClipChoice> clips = new JComboBox<>();
+    private final DefaultListModel<ClipChoice> clipRows = new DefaultListModel<>();
+    private final JList<ClipChoice> clipList = new JList<>(clipRows);
+    private final JToggleButton keysTab = new JToggleButton(m("workspace.timeline")),
+            curvesTab = new JToggleButton(m("workspace.curves"));
+    private final JComboBox<String> graphTrack = new JComboBox<>();
+    private final CurveView graph = new CurveView();
+    private JScrollPane trackScroll;
+    private boolean curves;
     private final JLabel eventStatus = new JLabel(m("animationpanel.0001"));
     private boolean zeroEmitted;
     private long firedCount;
@@ -65,20 +73,24 @@ final class AnimationPanel extends JPanel {
             snapping = new JCheckBox(m("animationpanel.0004"));
     private final JComboBox<String> mode = new JComboBox<>(
             new String[] { m("animationpanel.0005"), m("animationpanel.0006") });
+    private final JPanel modeButtons = new JPanel(new FlowLayout(FlowLayout.LEFT,3,0));
+    private final JToggleButton setupMode = new JToggleButton(m("workspace.setup")),
+            animateMode = new JToggleButton(m("workspace.animate"));
     private final TrackView tracks = new TrackView();
     private final JComponent ruler = new JComponent() {
         public Dimension getPreferredSize() {
-            return new Dimension(600, 24);
+            return WorkspaceTheme.size(600, 24);
         }
 
         protected void paintComponent(Graphics raw) {
             var g = (Graphics2D) raw;
-            g.setColor(new Color(37, 43, 51));
-            g.fillRect(0, 0, getWidth(), 24);
-            g.setColor(Color.LIGHT_GRAY);
+            g.setColor(WorkspaceTheme.INPUT);
+            g.fillRect(0, 0, getWidth(), WorkspaceTheme.scale(24));
+            g.setColor(WorkspaceTheme.MUTED);
             for (int i = 0; i <= 10; i++) {
                 double t = i * tracks.span() / 10;
-                g.drawString(String.format(Locale.ROOT, "%.2f", t), tracks.x(t) - 10, 17);
+                if(i==0)g.drawString(m("workspace.seconds"),8,WorkspaceTheme.scale(17));
+                g.drawString(String.format(Locale.ROOT, "%.2f", t), tracks.x(t) - 10, WorkspaceTheme.scale(17));
             }
         }
     };
@@ -88,29 +100,38 @@ final class AnimationPanel extends JPanel {
     AnimationPanel(Host host) {
         super(new BorderLayout());
         this.host = host;
-        var top = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 3));
+        var top = new JPanel(new WorkspaceFlowLayout(FlowLayout.LEFT, 6, 3));
         mode.setName("animation.mode");
         register(mode);
-        top.add(mode);
+        // Keep the existing mode command adapter for integrations; only the toggle pair is displayed.
+        var modeGroup=new ButtonGroup();modeGroup.add(setupMode);modeGroup.add(animateMode);
+        register(setupMode,"animation.setupMode");register(animateMode,"animation.animateMode");
+        register(modeButtons,"workspace.modeButtons");
+        modeButtons.add(setupMode);modeButtons.add(animateMode);
+        setupMode.addActionListener(e->requestMode(0));animateMode.addActionListener(e->requestMode(1));
+        refreshModeButtons();
+        modeButtons.setMaximumSize(modeButtons.getPreferredSize());
         register(clips, "animation.clips");
         clips.setPreferredSize(new Dimension(160, 26));
-        top.add(clips);
-        addButton(top, m("animationpanel.0007"), "animation.newClip", () -> organize("new"));
-        addButton(top, m("animationpanel.0008"), "animation.duplicateClip", () -> organize("copy"));
-        addButton(top, m("animationpanel.0009"), "animation.renameClip", () -> organize("rename"));
-        addButton(top, m("animationpanel.0010"), "animation.deleteClip", () -> organize("delete"));
+        var tabs=new ButtonGroup();tabs.add(keysTab);tabs.add(curvesTab);keysTab.setSelected(true);
+        register(keysTab,"animation.keysView");register(curvesTab,"animation.curvesView");
+        keysTab.setIcon(new WorkspaceIcon(WorkspaceIcon.Kind.KEY));curvesTab.setIcon(new WorkspaceIcon(WorkspaceIcon.Kind.CURVE));
+        top.add(keysTab);top.add(curvesTab);
+        keysTab.addActionListener(e->curvesVisible(false));curvesTab.addActionListener(e->curvesVisible(true));
+        register(graphTrack,"animation.graphTrack");graphTrack.setPreferredSize(WorkspaceTheme.size(220,28));
+        graphTrack.setVisible(false);top.add(graphTrack);
+        graphTrack.addActionListener(e->{if(!refreshing)graph.repaint();});
         var header = new JPanel(new GridLayout(0, 1));
         header.add(top);
-        var resources = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-        addButton(resources, m("animationpanel.0011"), "animation.resources", () -> {
+        addButton(top, m("workspace.resources"), "animation.resources", () -> {
             if (!prepare())
                 return;
             clock.seek(clock.time());
             new ResourceDialog(this, host.history(), this::active, clock.time(), host::resourcesChanged, host::error,host::imageBase)
                     .setVisible(true);
         });
-        resources.add(eventStatus);
-        header.add(resources);
+        host.controls().get("animation.resources").setToolTipText(m("animationpanel.0011"));
+        eventStatus.setForeground(WorkspaceTheme.MUTED);top.add(eventStatus);
         add(header, BorderLayout.NORTH);
         clips.addActionListener(e -> guard(() -> {
             if (refreshing)
@@ -129,7 +150,7 @@ final class AnimationPanel extends JPanel {
             host.changed();
         }));
         var tools = new JPanel(new GridLayout(2, 1));
-        var transport = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+        var transport = new JPanel(new WorkspaceFlowLayout(FlowLayout.LEFT, 5, 2));
         addButton(transport, m("animationpanel.0012"), "animation.start", () -> seek(0));
         transport.add(play);
         play.setName("animation.play");
@@ -184,7 +205,7 @@ final class AnimationPanel extends JPanel {
                 () -> seek(Playback.snap(clock.time(), fps)));
         transport.add(frame);
         tools.add(transport);
-        var edit = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+        var edit = new JPanel(new WorkspaceFlowLayout(FlowLayout.LEFT, 5, 2));
         addButton(edit, m("animationpanel.0015"), "animation.keyTRS", () -> record(EnumSet.allOf(Channel.class)));
         for (var c : Channel.values())
             addButton(edit, m("animationpanel.0016") + c, "animation.key" + c.name(), () -> record(EnumSet.of(c)));
@@ -199,11 +220,13 @@ final class AnimationPanel extends JPanel {
                 () -> mutate(m("animationpanel.0021"), d -> AnimationEdits.remove(d, active, selection())));
         tools.add(edit);
         body.add(tools, BorderLayout.NORTH);
-        var scroll = new JScrollPane(tracks);
-        scroll.setPreferredSize(new Dimension(700, 130));
-        scroll.setColumnHeaderView(ruler);
-        register(scroll.getViewport(), "animation.trackViewport");
-        body.add(scroll);
+        trackScroll = new JScrollPane(tracks);
+        trackScroll.setBorder(BorderFactory.createEmptyBorder());
+        trackScroll.setPreferredSize(new Dimension(700, 145));
+        trackScroll.setColumnHeaderView(ruler);
+        register(trackScroll.getViewport(), "animation.trackViewport");
+        register(graph,"animation.graph");
+        body.add(trackScroll);
         add(body);
         body.setVisible(false);
         mode.addActionListener(e -> guard(() -> {
@@ -232,7 +255,7 @@ final class AnimationPanel extends JPanel {
             });
         });
         timer.start();
-        setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(80, 90, 100)));
+        setBorder(WorkspaceTheme.line(1, 0, 0, 0));
         tracks.setFocusable(true);
         register(tracks, "animation.tracks");
         bind("control C", () -> {
@@ -241,6 +264,60 @@ final class AnimationPanel extends JPanel {
         bind("control V", this::paste);
         bind("DELETE", () -> mutate(m("animationpanel.0021"), d -> AnimationEdits.remove(d, active, selection())));
         bind("ESCAPE", this::cancel);
+    }
+
+    JComponent modeSelector() { return modeButtons; }
+
+    private void requestMode(int index) {
+        try { mode.setSelectedIndex(index); }
+        finally { refreshModeButtons(); }
+    }
+
+    private void refreshModeButtons() {
+        setupMode.setSelected(!animate);animateMode.setSelected(animate);
+    }
+
+    JComponent navigator() {
+        var panel=new JPanel(new BorderLayout());
+        panel.setPreferredSize(WorkspaceTheme.size(220,210));panel.setMinimumSize(WorkspaceTheme.size(150,100));
+        var heading=WorkspaceTheme.heading(m("workspace.animations"));panel.add(heading,BorderLayout.NORTH);
+        clipList.setFixedCellHeight(WorkspaceTheme.scale(29));clipList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        register(clipList,"animation.list");
+        clipList.setBorder(BorderFactory.createEmptyBorder(5,6,5,6));
+        clipList.addListSelectionListener(e->{if(!refreshing&&!e.getValueIsAdjusting()){
+            int index=clipList.getSelectedIndex();if(index>=0&&index<clips.getItemCount())clips.setSelectedIndex(index);
+        }});
+        var scroll=new JScrollPane(clipList);scroll.setBorder(BorderFactory.createEmptyBorder());panel.add(scroll);
+        var actions=new JPanel(new GridLayout(1,4,2,0));actions.setBorder(BorderFactory.createEmptyBorder(0,4,0,0));
+        String[] commands={"new","copy","rename","delete"};
+        String[] names={"newClip","duplicateClip","renameClip","deleteClip"};
+        String[] symbols={"+","⧉","Aa","−"};
+        for(int i=0;i<commands.length;i++){
+            String command=commands[i];var button=new JButton(symbols[i]);
+            button.setMargin(new Insets(2,4,2,4));
+            button.setToolTipText(m("animationpanel."+String.format(Locale.ROOT,"%04d",7+i)));
+            button.getAccessibleContext().setAccessibleName(button.getToolTipText());
+            register(button,"animation."+names[i]);button.addActionListener(e->guard(()->organize(command)));actions.add(button);
+        }
+        heading.add(actions,BorderLayout.EAST);return panel;
+    }
+
+    boolean curvesVisible() { return curves; }
+
+    void curvesVisible(boolean visible) {
+        curves=visible;keysTab.setSelected(!visible);curvesTab.setSelected(visible);graphTrack.setVisible(visible);
+        if(visible){
+            var data=graphRows();int current=graphTrack.getSelectedIndex();
+            if(current<0||current>=data.size()||data.get(current).keys().isEmpty()){
+                Bone bone=host.selectedBone();int choice=-1;
+                for(int i=0;i<data.size();i++)if(!data.get(i).keys().isEmpty()){
+                    if(choice<0)choice=i;if(bone!=null&&data.get(i).target().equals(bone.id())){choice=i;break;}
+                }
+                if(choice>=0&&choice<graphTrack.getItemCount())graphTrack.setSelectedIndex(choice);
+            }
+        }
+        if(trackScroll!=null){trackScroll.setViewportView(visible?graph:tracks);trackScroll.setColumnHeaderView(visible?null:ruler);}
+        revalidate();repaint();
     }
 
     private void bind(String key, Runnable run) {
@@ -473,16 +550,26 @@ final class AnimationPanel extends JPanel {
                 if (a.id().equals(active))
                     clips.setSelectedItem(choice);
             }
+            var choices=new ArrayList<ClipChoice>();for(int i=0;i<clips.getItemCount();i++)choices.add(clips.getItemAt(i));
+            if(!choices.equals(Collections.list(clipRows.elements()))){clipRows.clear();choices.forEach(clipRows::addElement);}
+            clipList.setSelectedIndex(clips.getSelectedIndex());
             mode.setSelectedIndex(animate ? 1 : 0);
+            refreshModeButtons();
             body.setVisible(animate);
             if (!time.isFocusOwner())
                 time.setText(Double.toString(clock.time()));
             play.setText(clock.playing() ? m("animationpanel.0022") : m("animationpanel.0002"));
             frame.setText(String.format(Locale.ROOT, m("animationpanel.0023"), clock.time() * fps, duration()));
-            tracks.setPreferredSize(new Dimension(600, Math.max(90, rows().size() * 24)));
+            tracks.setPreferredSize(new Dimension(WorkspaceTheme.scale(600), Math.max(90, rows().size() * TrackView.ROW)));
             tracks.revalidate();
             tracks.repaint();
             ruler.repaint();
+            var rowData=graphRows();var labels=rowData.stream().map(TrackRow::label).toList();
+            var oldLabels=new ArrayList<String>();for(int i=0;i<graphTrack.getItemCount();i++)oldLabels.add(graphTrack.getItemAt(i));
+            Object chosen=graphTrack.getSelectedItem();
+            if(!labels.equals(oldLabels)){graphTrack.removeAllItems();labels.forEach(graphTrack::addItem);if(labels.contains(chosen))graphTrack.setSelectedItem(chosen);}
+            for(int i=0;i<rowData.size();i++)if(rowData.get(i).keys().stream().anyMatch(k->selection().contains(k.id()))){graphTrack.setSelectedIndex(i);break;}
+            graph.repaint();
         } finally {
             refreshing = false;
         }
@@ -778,6 +865,91 @@ final class AnimationPanel extends JPanel {
         }
     }
 
+    private List<TrackRow> graphRows() {
+        return rows().stream().filter(r->r.channel()!=null||r.constraintChannel()!=null).toList();
+    }
+
+    /** Reads outgoing curves from the real keys; editing still uses the shared curve command. */
+    private final class CurveView extends JComponent {
+        private final Color[] colors={WorkspaceTheme.ACCENT,new Color(0x8caddd),WorkspaceTheme.WARNING,new Color(0xc3a0dc),new Color(0xe39a9a),new Color(0x86c8d2)};
+        private final List<GraphPoint> hits=new ArrayList<>();
+        private record GraphPoint(EntityId id,int x,int y) {}
+        CurveView() {
+            setFocusable(true);
+            setPreferredSize(new Dimension(600,145));
+            addMouseListener(new MouseAdapter(){@Override public void mousePressed(MouseEvent e){guard(()->{
+                if(!animate||!editing()||!prepare())return;
+                requestFocusInWindow();
+                var hit=hits.stream().filter(p->Point.distance(p.x(),p.y(),e.getX(),e.getY())<=9).findFirst();
+                if(hit.isPresent()){
+                    var ids=new LinkedHashSet<>(selection());if(!e.isControlDown())ids.clear();
+                    if(!ids.add(hit.get().id())&&e.isControlDown())ids.remove(hit.get().id());
+                    host.history().selectKeys(ids);host.changed();
+                    if(e.getClickCount()==2)curveDialog();
+                }else if(e.getX()>=68)seek(Math.max(0,(e.getX()-68)*tracks.span()/Math.max(1,getWidth()-88)));
+            });}});
+            for(String key:new String[]{"control C","control V","DELETE","ESCAPE"}){
+                getInputMap().put(KeyStroke.getKeyStroke(key),key);
+                getActionMap().put(key,new AbstractAction(){public void actionPerformed(ActionEvent e){tracks.getActionMap().get(key).actionPerformed(e);}});
+            }
+        }
+        @Override protected void paintComponent(Graphics raw) {
+            var g=(Graphics2D)raw.create();hits.clear();
+            try {
+                g.setColor(WorkspaceTheme.CANVAS);g.fillRect(0,0,getWidth(),getHeight());
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setFont(getFont());
+                int left=68,right=Math.max(left+1,getWidth()-20),top=28,bottom=Math.max(top+1,getHeight()-29);
+                var data=graphRows();int index=graphTrack.getSelectedIndex();
+                if(index<0||index>=data.size()||data.get(index).keys().isEmpty()){
+                    g.setColor(WorkspaceTheme.MUTED);g.drawString(m("workspace.emptyCurve"),left,top+22);return;
+                }
+                var row=data.get(index);var keys=row.keys();int components=keys.get(0).values().size();
+                var samples=new ArrayList<List<double[]>>();double min=Double.POSITIVE_INFINITY,max=Double.NEGATIVE_INFINITY;
+                for(int c=0;c<components;c++){
+                    var points=new ArrayList<double[]>();
+                    for(int k=0;k<keys.size();k++){
+                        var a=keys.get(k);int count=k+1<keys.size()?60:0;
+                        for(int s=0;s<=count;s++){
+                            double t=a.time(),v=a.values().get(c);
+                            if(count>0){var b=keys.get(k+1);double p=s/(double)count;t+=(b.time()-a.time())*p;
+                                double q=row.constraintChannel()!=null&&row.constraintChannel().discrete(c)?(s==count?1:0):a.curves().get(c).progress(p);
+                                if(s==count&&(a.curves().get(c).kind()==Curve.Kind.STEPPED||row.constraintChannel()!=null&&row.constraintChannel().discrete(c)))points.add(new double[]{t,v});
+                                v=(1-q)*v+q*b.values().get(c);
+                            }
+                            if(Double.isFinite(v)){points.add(new double[]{t,v});min=Math.min(min,v);max=Math.max(max,v);}
+                        }
+                    }
+                    samples.add(points);
+                }
+                if(!Double.isFinite(min)||!Double.isFinite(max))return;
+                double pad=Math.max(.1,(max-min)*.12);min-=pad;max+=pad;
+                if(max-min<1){double mid=(max+min)/2;min=mid-.5;max=mid+.5;}
+                g.setColor(WorkspaceTheme.GRID);
+                for(int i=0;i<=4;i++){int y=top+(bottom-top)*i/4;g.drawLine(left,y,right,y);}
+                for(int i=0;i<=10;i++){int x=left+(right-left)*i/10;g.drawLine(x,top,x,bottom);}
+                g.setColor(WorkspaceTheme.MUTED);
+                for(int i=0;i<=4;i++){int y=top+(bottom-top)*i/4;g.drawString(String.format(Locale.ROOT,"%.2f",max-(max-min)*i/4),4,y+4);}
+                for(int i=0;i<=5;i++){int x=left+(right-left)*i/5;g.drawString(String.format(Locale.ROOT,"%.1f",tracks.span()*i/5),x-8,bottom+17);}
+                g.drawString(m("workspace.seconds"),Math.max(left,right-50),getHeight()-4);
+                String unit=row.channel()==Channel.ROTATE?"°":row.channel()==Channel.TRANSLATE?"X / Y":m("workspace.value");g.drawString(unit,5,16);
+                for(int c=0;c<components;c++){
+                    g.setColor(colors[c%colors.length]);g.setStroke(new BasicStroke(1.6f));
+                    var path=new java.awt.geom.Path2D.Double();boolean first=true;
+                    for(var p:samples.get(c)){double x=left+p[0]/tracks.span()*(right-left),y=bottom-(p[1]-min)/(max-min)*(bottom-top);if(first)path.moveTo(x,y);else path.lineTo(x,y);first=false;}
+                    g.draw(path);
+                    for(var key:keys){int x=(int)(left+key.time()/tracks.span()*(right-left)),y=(int)(bottom-(key.values().get(c)-min)/(max-min)*(bottom-top));
+                        hits.add(new GraphPoint(key.id(),x,y));g.setColor(selection().contains(key.id())?WorkspaceTheme.WARNING:colors[c%colors.length]);
+                        g.fillRect(x-3,y-3,6,6);g.setColor(colors[c%colors.length]);
+                    }
+                    String label=row.constraintChannel()!=null?row.constraintChannel().labels().get(c):components==1?row.kind():c==0?"X":"Y";
+                    int labelX=left+c*105;g.drawLine(labelX,12,labelX+12,12);g.setColor(WorkspaceTheme.MUTED);g.drawString(label,labelX+18,16);
+                }
+                int cursor=(int)(left+clock.time()/tracks.span()*(right-left));g.setColor(WorkspaceTheme.ACCENT);g.drawLine(cursor,top,cursor,bottom);
+            }finally{g.dispose();}
+        }
+    }
+
     private final class TrackView extends JComponent implements Scrollable {
         public Dimension getPreferredScrollableViewportSize() {
             return new Dimension(600, 130);
@@ -800,7 +972,8 @@ final class AnimationPanel extends JPanel {
             return false;
         }
 
-        private static final int LEFT = 150;
+        private static final int LEFT = WorkspaceTheme.scale(150);
+        private static final int ROW = WorkspaceTheme.scale(24);
         private Point pressed;
         private boolean dragging, invalid;
         private double range, dragOrigin;
@@ -815,12 +988,12 @@ final class AnimationPanel extends JPanel {
                         requestFocusInWindow();
                         range = span();
                         pressed = e.getPoint();
-                        int row = e.getY() / 24;
+                        int row = e.getY() / ROW;
                         EntityId hit = null;
                         var rows = rows();
                         if (row >= 0 && e.getY() >= 0 && row < rows.size())
                             for (var k : rows.get(row).keys())
-                                if (Math.abs(x(k.time()) - e.getX()) <= 8 && Math.abs(12 + row * 24 - e.getY()) <= 10)
+                                if (Math.abs(x(k.time()) - e.getX()) <= 8 && Math.abs(ROW / 2 + row * ROW - e.getY()) <= ROW / 2)
                                     hit = k.id();
                         var ids = new LinkedHashSet<>(selection());
                         if (hit != null) {
@@ -916,33 +1089,37 @@ final class AnimationPanel extends JPanel {
 
         protected void paintComponent(Graphics raw) {
             var g = (Graphics2D) raw;
-            g.setColor(new Color(37, 43, 51));
+            g.setColor(WorkspaceTheme.CANVAS);
             g.fillRect(0, 0, getWidth(), getHeight());
             g.setFont(getFont());
             var rowData = rows();
             int rows = rowData.size();
             for (int row = 0; row < rows; row++) {
-                int y = row * 24;
-                g.setColor(row % 3 == 0 ? new Color(55, 62, 71) : new Color(43, 49, 58));
-                g.fillRect(0, y, getWidth(), 24);
-                g.setColor(Color.LIGHT_GRAY);
-                g.drawString(rowData.get(row).label(), 8, y + 17);
+                int y = row * ROW;
+                boolean selectedRow=rowData.get(row).keys().stream().anyMatch(k->selection().contains(k.id()));
+                g.setColor(selectedRow?WorkspaceTheme.SELECTION:WorkspaceTheme.PANEL);
+                g.fillRect(0, y, LEFT, ROW);
+                g.setColor(WorkspaceTheme.GRID);g.drawLine(0,y+ROW-1,getWidth(),y+ROW-1);
+                g.setColor(selectedRow?WorkspaceTheme.ACCENT:WorkspaceTheme.MUTED);
+                Shape clip=g.getClip();g.clipRect(0,y,LEFT-5,ROW);
+                g.drawString(rowData.get(row).label(), 8, y + WorkspaceTheme.scale(17));
+                g.setClip(clip);
             }
             double span = span();
             for (int i = 0; i <= 10; i++) {
                 double t = i * span / 10;
                 int x = x(t);
-                g.setColor(new Color(85, 92, 100));
+                g.setColor(WorkspaceTheme.GRID);
                 g.drawLine(x, 0, x, getHeight());
             }
             for (int row = 0; row < rows; row++) {
                 for (var k : rowData.get(row).keys()) {
-                    int x = x(k.time()), y = 12 + row * 24;
-                    g.setColor(selection().contains(k.id()) ? new Color(255, 194, 65) : new Color(120, 190, 225));
+                    int x = x(k.time()), y = ROW / 2 + row * ROW;
+                    g.setColor(selection().contains(k.id()) ? WorkspaceTheme.WARNING : WorkspaceTheme.ACCENT);
                     g.fillPolygon(new int[] { x, x + 6, x, x - 6 }, new int[] { y - 7, y, y + 7, y }, 4);
                 }
             }
-            g.setColor(invalid ? Color.RED : new Color(255, 105, 90));
+            g.setColor(invalid ? WorkspaceTheme.ERROR : WorkspaceTheme.ACCENT);
             int cursor = x(clock.time());
             g.drawLine(cursor, 0, cursor, getHeight());
         }

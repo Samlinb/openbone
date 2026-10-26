@@ -1,0 +1,26 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+    
+        {
+            "type": "java",
+            "name": "Current File",
+            "request": "launch",
+            "mainClass": "${file}"
+        },
+        {
+            "type": "java",
+            "name": "EditorApplication",
+            "request": "launch",
+            "mainClass": "io.github.samlinb.openbone.EditorApplication",
+            "projectName": "OpenBone"
+        },
+        {
+            "type": "java",
+            "name": "RecoveryIsolationTest$LockPeer",
+            "request": "launch",
+            "mainClass": "io.github.samlinb.openbone.io.RecoveryIsolationTest$LockPeer",
+            "projectName": "OpenBone"
+        }
+    ]
+}
