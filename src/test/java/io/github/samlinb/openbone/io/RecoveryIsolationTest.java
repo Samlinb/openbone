@@ -106,7 +106,7 @@ class RecoveryIsolationTest {
         saved(1);String java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase(Locale.ROOT).contains("win")?"java.exe":"java").toString();
         var peer=new ProcessBuilder(java,"-cp",System.getProperty("java.class.path"),LockPeer.class.getName(),root.toString()).redirectErrorStream(true).start();
         try{
-            var line=CompletableFuture.supplyAsync(()->{try{return new BufferedReader(new InputStreamReader(peer.getInputStream())).readLine();}catch(IOException e){throw new UncheckedIOException(e);}}).get(5,TimeUnit.SECONDS);assertEquals("READY",line);
+            var line=CompletableFuture.supplyAsync(()->{try(var br=new BufferedReader(new InputStreamReader(peer.getInputStream()))){String s;while((s=br.readLine())!=null){if("READY".equals(s))return s;}}catch(IOException e){throw new UncheckedIOException(e);}return null;}).get(5,TimeUnit.SECONDS);assertEquals("READY",line);
             var first=RecoveryStore.candidates(root);try{assertEquals(1,first.size());assertTrue(RecoveryStore.candidates(root).isEmpty());}finally{close(first);}
             peer.getOutputStream().write(1);peer.getOutputStream().flush();assertTrue(peer.waitFor(5,TimeUnit.SECONDS));assertEquals(0,peer.exitValue());repeat(2);
             System.out.println("Recovery lock peer pid="+peer.pid()+" exit="+peer.exitValue());
