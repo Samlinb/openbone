@@ -74,7 +74,7 @@ public final class AtlasSplitter {
             }
             var resources=document.resources();
             var result=new DocumentSnapshot(document.bones(),document.slots(),attachments,document.animations(),document.constraints(),
-                    new Resources(resources.skins(),resources.activeSkin(),resources.events(),metadata));
+                    new Resources(resources.skins(),resources.activeSkin(),resources.events(),metadata,resources.metadata()));
             return new Result(result,directory,extracted.size());
         } catch(IOException|RuntimeException failure) {
             // This directory was freshly created for this operation. Never clean source resources.

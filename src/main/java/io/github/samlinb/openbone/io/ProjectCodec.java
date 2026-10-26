@@ -38,7 +38,7 @@ public final class ProjectCodec {
                 throw bad("$.schemaVersion", "Missing required field");
             JsonNode version = root.get("schemaVersion");
             if (!version.isIntegralNumber() || !version.canConvertToInt() || version.intValue() < 1
-                    || version.intValue() > 7)
+                    || version.intValue() > 10)
                 throw bad("$.schemaVersion", "Unsupported schema version: " + version);
             if (version.intValue() == 1)
                 fields(root, "$", "schemaVersion", "bones", "slots", "attachments");
@@ -55,9 +55,12 @@ public final class ProjectCodec {
             int index = 0;
             for (JsonNode n : array(root, "bones", "$")) {
                 String p = "$.bones[" + index++ + "]";
-                fields(n, p, "id", "name", "parentId", "local", "length");
+                if (version.intValue() >= 8) fields(n, p, "id", "name", "parentId", "local", "length", "color", "inherit");
+                else fields(n, p, "id", "name", "parentId", "local", "length");
                 bones.add(new Bone(id(n, "id", p), text(n, "name", p), nullableId(n, "parentId", p),
-                        transform(n.get("local"), p + ".local"), number(n, "length", p)));
+                        transform(n.get("local"), p + ".local"), number(n, "length", p),
+                        n.has("color") ? Rgba.parse(text(n, "color", p)) : Rgba.WHITE,
+                        n.has("inherit") ? Bone.Inherit.valueOf(text(n, "inherit", p)) : Bone.Inherit.normal));
             }
             index = 0;
             for (JsonNode n : array(root, "slots", "$")) {
@@ -84,9 +87,15 @@ public final class ProjectCodec {
                     continue;
                 }
                 if (text(n, "type", p).equals("clipping") && version.intValue() >= 3) {
-                    fields(n, p, "type", "id", "name", "slotId", "vertices", "endSlotId");
+                    if (version.intValue() >= 10) fields(n, p, "type", "id", "name", "slotId", "vertices", "endSlotId", "color");
+                    else fields(n, p, "type", "id", "name", "slotId", "vertices", "endSlotId");
                     attachments.add(new ClippingAttachment(id(n, "id", p), text(n, "name", p), id(n, "slotId", p),
-                            points(n, "vertices", p), nullableId(n, "endSlotId", p)));
+                            points(n, "vertices", p), nullableId(n, "endSlotId", p), n.has("color") ? Rgba.parse(text(n,"color",p)) : ClippingAttachment.DEFAULT_COLOR));
+                    continue;
+                }
+                if (text(n, "type", p).equals("boundingbox") && version.intValue() >= 10) {
+                    fields(n, p, "type", "id", "name", "slotId", "vertices", "color");
+                    attachments.add(new BoundingBoxAttachment(id(n,"id",p), text(n,"name",p), id(n,"slotId",p), points(n,"vertices",p), Rgba.parse(text(n,"color",p))));
                     continue;
                 }
                 if (text(n, "type", p).equals("mesh") && version.intValue() >= 3) {
@@ -141,6 +150,7 @@ public final class ProjectCodec {
                     String q = p + ".timelines[" + ti++ + "]";
                     fields(t, q, "boneId", "channel", "keys");
                     Channel channel = Channel.valueOf(text(t, "channel", q));
+                    if (channel == Channel.SHEAR && version.intValue() < 10) throw bad(q + ".channel", "Shear requires schema 10");
                     List<Keyframe> keys = new ArrayList<>();
                     int ki = 0;
                     for (var k : array(t, "keys", q)) {
@@ -155,6 +165,8 @@ public final class ProjectCodec {
                         }
                         for (var c : array(k, "curves", r)) {
                             fields(c, r + ".curves", "kind", "x1", "y1", "x2", "y2");
+                            if (version.intValue() < 10 && number(c,"x1",r) > number(c,"x2",r))
+                                throw bad(r + ".curves", "Crossed curve handles require schema 10");
                             curves.add(new Curve(Curve.Kind.valueOf(text(c, "kind", r)), number(c, "x1", r),
                                     number(c, "y1", r), number(c, "x2", r), number(c, "y2", r)));
                         }
@@ -294,10 +306,21 @@ public final class ProjectCodec {
         }
     }
 
+    private static boolean needsExtendedAnimation(DocumentSnapshot d) {
+        return d.bones().stream().anyMatch(b -> b.local().shearX() != 0 || b.local().shearY() != 0)
+                || d.attachments().stream().anyMatch(a -> a instanceof BoundingBoxAttachment
+                    || a instanceof ClippingAttachment c && !c.color().equals(ClippingAttachment.DEFAULT_COLOR))
+                || d.animations().stream().flatMap(a -> a.timelines().stream()).anyMatch(t -> t.channel() == Channel.SHEAR
+                    || t.keys().stream().flatMap(k -> k.curves().stream()).anyMatch(c -> c.x1() > c.x2()))
+                || d.animations().stream().flatMap(a -> a.keys().stream()).flatMap(k -> k.curves().stream()).anyMatch(c -> c.x1() > c.x2());
+    }
+
     public byte[] encode(DocumentSnapshot model) throws IOException {
         Objects.requireNonNull(model, "model");
         ObjectNode root = mapper.createObjectNode();
-        root.put("schemaVersion", model.slots().stream().anyMatch(s -> !s.color().equals(Rgba.WHITE))
+        root.put("schemaVersion", needsExtendedAnimation(model) ? 10 : !model.resources().metadata().equals(SpineMetadata.EMPTY) ? 9
+                : model.bones().stream().anyMatch(b -> !b.color().equals(Rgba.WHITE) || b.inherit() != Bone.Inherit.normal) ? 8
+                : model.slots().stream().anyMatch(s -> !s.color().equals(Rgba.WHITE))
                 || model.animations().stream().anyMatch(a -> !a.discrete().colors().isEmpty()) ? 7 : P8ProjectJson.needed(model) ? 6
                 : model.animations().stream().anyMatch(a -> !a.constraintTracks().isEmpty()) ? 5
                         : !model.constraints().isEmpty()
@@ -317,6 +340,10 @@ public final class ProjectCodec {
             putId(n, "parentId", b.parentId());
             n.set("local", transformNode(b.local()));
             n.put("length", b.length());
+            if (root.path("schemaVersion").asInt() >= 8) {
+                n.put("color", b.color().hex());
+                n.put("inherit", b.inherit().name());
+            }
         }
         for (Slot s : model.slots()) {
             ObjectNode n = slots.addObject();
@@ -329,6 +356,12 @@ public final class ProjectCodec {
             if (root.path("schemaVersion").asInt() >= 7) s.color().values().forEach(n.putArray("color")::add);
         }
         for (Attachment a : model.attachments()) {
+            if (a instanceof BoundingBoxAttachment box) {
+                var n = attachments.addObject().put("type", "boundingbox").put("id", box.id().value()).put("name", box.name())
+                        .put("slotId", box.slotId().value()).put("color", box.color().hex());
+                putPoints(n.putArray("vertices"), box.vertices());
+                continue;
+            }
             if (a instanceof PathAttachment path) {
                 var n = attachments.addObject().put("type", "path").put("id", path.id().value())
                         .put("name", path.name()).put("slotId", path.slotId().value()).put("closed", path.closed())
@@ -342,6 +375,7 @@ public final class ProjectCodec {
                         .put("slotId", c.slotId().value());
                 putPoints(n.putArray("vertices"), c.vertices());
                 putId(n, "endSlotId", c.endSlotId());
+                if (root.path("schemaVersion").asInt() >= 10) n.put("color", c.color().hex());
                 continue;
             }
             if (a instanceof MeshAttachment m) {
@@ -519,6 +553,7 @@ public final class ProjectCodec {
         n.put("rotation", t.rotation());
         n.put("scaleX", t.scaleX());
         n.put("scaleY", t.scaleY());
+        if (t.shearX() != 0 || t.shearY() != 0) n.put("shearX", t.shearX()).put("shearY", t.shearY());
         return n;
     }
 
@@ -530,9 +565,10 @@ public final class ProjectCodec {
     }
 
     private static Transform transform(JsonNode n, String path) throws ProjectFormatException {
-        fields(n, path, "x", "y", "rotation", "scaleX", "scaleY");
+        if (n != null && (n.has("shearX") || n.has("shearY"))) fields(n, path, "x", "y", "rotation", "scaleX", "scaleY", "shearX", "shearY");
+        else fields(n, path, "x", "y", "rotation", "scaleX", "scaleY");
         return new Transform(number(n, "x", path), number(n, "y", path), number(n, "rotation", path),
-                number(n, "scaleX", path), number(n, "scaleY", path));
+                number(n, "scaleX", path), number(n, "scaleY", path), n.has("shearX") ? number(n,"shearX",path) : 0, n.has("shearY") ? number(n,"shearY",path) : 0);
     }
 
     JsonNode parseTree(byte[] bytes) throws ProjectFormatException {

@@ -23,6 +23,7 @@ final class P8ProjectJson {
 
     static void writeResources(ObjectNode root, DocumentSnapshot d) {
         var r = root.putObject("resources").put("activeSkin", d.resources().activeSkin());
+        if (!d.resources().metadata().equals(SpineMetadata.EMPTY)) SpineMetadataJson.writeProject(r.putObject("metadata"), d.resources().metadata());
         var skins = r.putArray("skins");
         for (var skin : d.resources().skins()) {
             var s = skins.addObject().put("name", skin.name());
@@ -50,7 +51,8 @@ final class P8ProjectJson {
     static Resources readResources(JsonNode root) throws ProjectFormatException {
         var r = root.get("resources");
         String p = "$.resources";
-        fields(r, p, "activeSkin", "skins", "events", "atlas");
+        if (root.path("schemaVersion").asInt() >= 9 && r.has("metadata")) fields(r, p, "activeSkin", "skins", "events", "atlas", "metadata");
+        else fields(r, p, "activeSkin", "skins", "events", "atlas");
         var skins = new ArrayList<Skin>();
         for (var s : array(r, "skins", p)) {
             fields(s, p + ".skins", "name", "attachments");
@@ -82,7 +84,8 @@ final class P8ProjectJson {
             if (atlas.putIfAbsent(id(a, "attachmentId", p), region) != null)
                 throw bad(p, "Duplicate atlas attachment");
         }
-        return new Resources(skins, text(r, "activeSkin", p), events, atlas);
+        return new Resources(skins, text(r, "activeSkin", p), events, atlas,
+                r.has("metadata") ? SpineMetadataJson.readProject(r.get("metadata")) : SpineMetadata.EMPTY);
     }
 
     static void writeTracks(ObjectNode node, DiscreteTracks tracks) {

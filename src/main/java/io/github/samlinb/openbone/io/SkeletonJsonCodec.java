@@ -41,6 +41,7 @@ public final class SkeletonJsonCodec {
             throw ProjectCodec.bad("$.bones", "Runtime export requires exactly one root bone");
         var root = json.createObjectNode();
         root.putObject("skeleton").put("spine", VERSION).put("images", images);
+        SpineMetadataJson.writeSkeleton((ObjectNode)root.get("skeleton"), d.resources().metadata());
         if (d.constraints().stream().anyMatch(c -> c instanceof PhysicsConstraint))
             ((ObjectNode) root.get("skeleton")).put("referenceScale", 100);
         var bones = root.putArray("bones");
@@ -50,7 +51,8 @@ public final class SkeletonJsonCodec {
                 n.put("parent", d.bone(b.parentId()).name());
             putTransform(n, b.local());
             n.put("length", b.length());
-            n.put("inherit", "normal");
+            n.put("inherit", b.inherit().name());
+            if (!b.color().equals(Rgba.WHITE)) n.put("color", b.color().hex());
         }
         Map<EntityId, Integer> constraintOrder = new HashMap<>();
         for (int order = 0; order < d.constraints().size(); order++)
@@ -132,6 +134,13 @@ public final class SkeletonJsonCodec {
             for (var a : d.attachments()) {
                 if (!Objects.equals(sourceSkin.find(a.slotId(), a.name()), a.id()))
                     continue;
+                if (a instanceof BoundingBoxAttachment box) {
+                    var n = skin.withObject("/" + escape(bySlot.get(box.slotId()).name())).putObject(box.name())
+                            .put("type", "boundingbox").put("vertexCount", box.vertices().size()).put("color", box.color().hex());
+                    var vertices = n.putArray("vertices");
+                    for (var v : box.vertices()) vertices.add(v.x()).add(v.y());
+                    continue;
+                }
                 if (a instanceof PathAttachment p) {
                     var n = skin.withObject("/" + escape(bySlot.get(p.slotId()).name())).putObject(p.name())
                             .put("type", "path").put("closed", p.closed()).put("constantSpeed", p.constantSpeed())
@@ -145,6 +154,7 @@ public final class SkeletonJsonCodec {
                 if (a instanceof ClippingAttachment c) {
                     var n = skin.withObject("/" + escape(bySlot.get(c.slotId()).name())).putObject(c.name())
                             .put("type", "clipping").put("vertexCount", c.vertices().size());
+                    n.put("color", c.color().hex());
                     var v = n.putArray("vertices");
                     for (var p : c.vertices()) {
                         v.add(p.x());
@@ -183,6 +193,7 @@ public final class SkeletonJsonCodec {
                         uvs.add(uv.y());
                     }
                     m.triangles().forEach(n.putArray("triangles")::add);
+                    SpineMetadataJson.writeMesh(n, d.resources().metadata().meshes().get(m.id()));
                     continue;
                 }
                 var r = (RegionAttachment) a;
@@ -209,7 +220,7 @@ public final class SkeletonJsonCodec {
                 else {
                     // Independent axis timelines avoid the whole-timeline stepped flag of paired
                     // tracks.
-                    String prefix = t.channel() == Channel.TRANSLATE ? "translate" : "scale";
+                    String prefix = t.channel().name().toLowerCase(Locale.ROOT);
                     writeTrack(bone.putArray(prefix + "x"), t, 0);
                     writeTrack(bone.putArray(prefix + "y"), t, 1);
                 }
@@ -266,6 +277,8 @@ public final class SkeletonJsonCodec {
     private static void putTransform(ObjectNode n, Transform t) {
         n.put("x", t.x()).put("y", t.y()).put("rotation", t.rotation()).put("scaleX", t.scaleX()).put("scaleY",
                 t.scaleY());
+        if (t.shearX() != 0) n.put("shearX", t.shearX());
+        if (t.shearY() != 0) n.put("shearY", t.shearY());
     }
 
     private void writeTrack(ArrayNode out, BoneTimeline t, int component) {
@@ -356,7 +369,9 @@ public final class SkeletonJsonCodec {
                 if (parent != null && !boneIds.containsKey(parent))
                     throw ProjectCodec.bad("$.bones.parent", "Unknown parent " + parent);
                 bones.add(new Bone(boneIds.get(name), name, parent == null ? null : boneIds.get(parent),
-                        transform(n, "$.bones"), num(n, "length", 0, "$.bones")));
+                        transform(n, "$.bones"), num(n, "length", 0, "$.bones"),
+                        n.has("color") ? Rgba.parse(ProjectCodec.text(n, "color", "$.bones")) : Rgba.WHITE,
+                        Bone.Inherit.valueOf(n.has("inherit") ? ProjectCodec.text(n, "inherit", "$.bones") : "normal")));
             }
             if (bones.isEmpty() || bones.stream().filter(b -> b.parentId() == null).count() != 1)
                 throw ProjectCodec.bad("$.bones", "Exactly one root required");
@@ -398,6 +413,17 @@ public final class SkeletonJsonCodec {
                         var ae = ait.next();
                         var n = ae.getValue();
                         String name = ae.getKey(), p = "$.skins.attachments." + slot + "." + name;
+                        if (n.path("type").asText().equals("boundingbox")) {
+                            int count = ProjectCodec.integer(n.get("vertexCount"), p + ".vertexCount");
+                            var vertices = ProjectCodec.points(n, "vertices", p);
+                            if (vertices.size() != count) throw ProjectCodec.bad(p + ".vertices", "Expected unweighted bounding box XY pairs");
+                            var id = EntityId.create();
+                            attachmentIds.put(skinName + "\0" + slot + "\0" + name, id);
+                            skinEntries.computeIfAbsent(slotIds.get(slot), s -> new LinkedHashMap<>()).put(name, id);
+                            attachments.add(new BoundingBoxAttachment(id, name, slotIds.get(slot), vertices,
+                                    n.has("color") ? Rgba.parse(ProjectCodec.text(n,"color",p)) : BoundingBoxAttachment.DEFAULT_COLOR));
+                            continue;
+                        }
                         if (n.path("type").asText().equals("clipping")) {
                             int count = ProjectCodec.integer(n.get("vertexCount"), p + ".vertexCount");
                             if (count < 3 || count > io.github.samlinb.openbone.core.math.MeshTopology.MAX_VERTICES)
@@ -417,7 +443,8 @@ public final class SkeletonJsonCodec {
                             attachmentIds.put(skinName + "\0" + slot + "\0" + name, id);
                             skinEntries.computeIfAbsent(slotIds.get(slot), s -> new LinkedHashMap<>()).put(name, id);
                             attachments.add(new ClippingAttachment(id, name, slotIds.get(slot),
-                                    ProjectCodec.points(n, "vertices", p), end));
+                                    ProjectCodec.points(n, "vertices", p), end,
+                                    n.has("color") ? Rgba.parse(ProjectCodec.text(n,"color",p)) : ClippingAttachment.DEFAULT_COLOR));
                             continue;
                         }
                         if (n.path("type").asText().equals("path")) {
@@ -560,6 +587,7 @@ public final class SkeletonJsonCodec {
                                     case TRANSLATE -> "translate";
                                     case ROTATE -> "rotate";
                                     case SCALE -> "scale";
+                                    case SHEAR -> "shear";
                                 };
                                 EntityId id = boneIds.get(be.getKey());
                                 if (bt.has(prefix)) {
@@ -718,8 +746,9 @@ public final class SkeletonJsonCodec {
             animations = ConstraintTimelineJson.read(root, animations, constraints);
             var d = new DocumentSnapshot(bones, slots, attachments, animations, constraints,
                     new Resources(importedSkins.size() == 1 && importedSkins.get(0).name().equals("default") ? List.of()
-                            : importedSkins, "default", eventDefinitions, atlasMetadata));
-            RuntimeRange.validate(d);
+                            : importedSkins, "default", eventDefinitions, atlasMetadata, SpineMetadataJson.readRuntime(root, attachmentIds)));
+            // Runtime export certificates must not delete valid editable source data.
+            if (!legacy) RuntimeRange.validate(d);
             return d;
         } catch (IllegalArgumentException | NullPointerException e) {
             throw new ProjectFormatException("Invalid 4.2.22 model: " + e.getMessage(), e);
@@ -729,9 +758,6 @@ public final class SkeletonJsonCodec {
     /** Retry independent entries transactionally, so a malformed mesh or track cannot discard its siblings. */
     private DocumentSnapshot recover38(ObjectNode source, Path base, Map<String, AtlasSubset.Region> atlas,
             ProjectFormatException failure) throws IOException {
-        record Deferred(String path,java.util.function.Consumer<ObjectNode> edit) {}
-        var clipping=new ArrayList<Deferred>();
-        var clippingSetup=new ArrayList<Deferred>();
         warnings.add("3.8 recovery: " + failure.getMessage());
         ObjectNode clean = source.deepCopy();
         clean.remove(List.of("ik", "transform", "path", "events"));
@@ -751,12 +777,6 @@ public final class SkeletonJsonCodec {
                 var slot = si.next();
                 for (var ai = slot.getValue().fields(); ai.hasNext();) {
                     var attachment = ai.next();
-                    if(attachment.getValue().path("type").asText().equals("clipping")) {
-                        clipping.add(new Deferred("$.skins["+i+"]."+slot.getKey()+"."+attachment.getKey(),
-                                n->((ObjectNode)n.path("skins").get(index).path("attachments"))
-                                        .withObject("/"+escape(slot.getKey())).set(attachment.getKey(),attachment.getValue())));
-                        continue;
-                    }
                     clean = accept38(clean, base, atlas, "$.skins[" + i + "]." + slot.getKey() + "." + attachment.getKey(),
                             n -> ((ObjectNode)n.path("skins").get(index).path("attachments"))
                                     .withObject("/" + escape(slot.getKey())).set(attachment.getKey(), attachment.getValue()));
@@ -772,13 +792,6 @@ public final class SkeletonJsonCodec {
         for (int i = 0; i < source.path("slots").size(); i++) {
             final int index = i;
             var slot = source.path("slots").get(i);
-            boolean clippingAttachment=false;
-            for(var skin:source.path("skins")) clippingAttachment|=skin.path("attachments").path(slot.path("name").asText())
-                    .path(slot.path("attachment").asText()).path("type").asText().equals("clipping");
-            if(clippingAttachment) {
-                clippingSetup.add(new Deferred("$.slots["+i+"].attachment",n->((ObjectNode)n.path("slots").get(index)).set("attachment",slot.get("attachment"))));
-                continue;
-            }
             if (slot.has("attachment")) clean = accept38(clean, base, atlas, "$.slots[" + i + "].attachment",
                     n -> ((ObjectNode)n.path("slots").get(index)).set("attachment", slot.get("attachment")));
         }
@@ -817,9 +830,6 @@ public final class SkeletonJsonCodec {
                 }
             }
         }
-        // A single clipping mask must not discard every otherwise valid constraint and attachment track.
-        for(var deferred:clipping) clean=accept38(clean,base,atlas,deferred.path(),deferred.edit());
-        for(var deferred:clippingSetup) clean=accept38(clean,base,atlas,deferred.path(),deferred.edit());
         return decodeTree(clean, base, atlas, true);
     }
 
@@ -980,7 +990,7 @@ public final class SkeletonJsonCodec {
 
     private static Transform transform(JsonNode n, String p) throws ProjectFormatException {
         return new Transform(num(n, "x", 0, p), num(n, "y", 0, p), num(n, "rotation", 0, p), num(n, "scaleX", 1, p),
-                num(n, "scaleY", 1, p));
+                num(n, "scaleY", 1, p), num(n, "shearX", 0, p), num(n, "shearY", 0, p));
     }
 
     private static double num(JsonNode n, String key, double fallback, String p) throws ProjectFormatException {
@@ -1056,14 +1066,13 @@ public final class SkeletonJsonCodec {
                         "relative", "rotation", "x", "y", "scaleX", "scaleY", "shearY", "mixRotate", "mixX", "mixY",
                         "mixScaleX", "mixScaleY", "mixShearY");
         }
-        allowed(root.get("skeleton"), "$.skeleton", errors, "spine", "images", "referenceScale");
+        allowed(root.get("skeleton"), "$.skeleton", errors, "spine", "images", "referenceScale", "hash", "x", "y", "width", "height", "audio", "fps");
         int i = 0;
         for (var b : ProjectCodec.array(root, "bones", "$")) {
             String p = "$.bones[" + i++ + "]";
-            allowed(b, p, errors, "name", "parent", "x", "y", "rotation", "scaleX", "scaleY", "length", "inherit");
-            if (b.has("inherit") && !b.get("inherit").isTextual()
-                    || b.has("inherit") && !b.get("inherit").asText().equals("normal"))
-                errors.add(p + ".inherit (only normal)");
+            allowed(b, p, errors, "name", "parent", "x", "y", "rotation", "scaleX", "scaleY", "length", "inherit", "color", "shearX", "shearY");
+            if (b.has("inherit")) try { Bone.Inherit.valueOf(b.get("inherit").textValue()); }
+            catch (IllegalArgumentException | NullPointerException invalid) { errors.add(p + ".inherit (invalid mode)"); }
         }
         i = 0;
         for (var s : ProjectCodec.array(root, "slots", "$")) {
@@ -1084,19 +1093,21 @@ public final class SkeletonJsonCodec {
                     var ae = ai.next();
                     var n = ae.getValue();
                     String q = p + ".attachments." + se.getKey() + "." + ae.getKey();
-                    if (n.path("type").asText().equals("clipping"))
+                    if (n.path("type").asText().equals("boundingbox"))
+                        allowed(n, q, errors, "type", "vertexCount", "vertices", "color");
+                    else if (n.path("type").asText().equals("clipping"))
                         allowed(n, q, errors, "type", "end", "vertexCount", "vertices", "color");
                     else if (n.path("type").asText().equals("path"))
                         allowed(n, q, errors, "type", "closed", "constantSpeed", "vertexCount", "vertices", "lengths",
                                 "color");
                     else if (n.path("type").asText().equals("mesh"))
-                        allowed(n, q, errors, "type", "path", "vertices", "uvs", "triangles", "hull", "color");
+                        allowed(n, q, errors, "type", "path", "vertices", "uvs", "triangles", "hull", "color", "edges", "width", "height");
                     else
                         allowed(n, q, errors, "type", "path", "x", "y", "rotation", "scaleX", "scaleY", "width",
                                 "height", "color");
-                    if (n.has("type") && !Set.of("region", "mesh", "clipping", "path").contains(n.get("type").asText()))
-                        errors.add(q + ".type (only region/mesh/clipping/path)");
-                    if (n.has("color") && !n.get("color").asText().equalsIgnoreCase("ffffffff"))
+                    if (n.has("type") && !Set.of("region", "mesh", "clipping", "path", "boundingbox").contains(n.get("type").asText()))
+                        errors.add(q + ".type (only region/mesh/clipping/path/boundingbox)");
+                    if (n.has("color") && !Set.of("clipping","boundingbox").contains(n.path("type").asText()) && !n.get("color").asText().equalsIgnoreCase("ffffffff"))
                         errors.add(q + ".color (only white)");
                 }
             }
@@ -1144,16 +1155,16 @@ public final class SkeletonJsonCodec {
                     var be = bi.next();
                     String q = p + ".bones." + be.getKey();
                     allowed(be.getValue(), q, errors, "rotate", "translate", "translatex", "translatey", "scale",
-                            "scalex", "scaley");
+                            "scalex", "scaley", "shear", "shearx", "sheary");
                     for (var ti = be.getValue().fields(); ti.hasNext();) {
                         var te = ti.next();
-                        if (!List.of("rotate", "translate", "translatex", "translatey", "scale", "scalex", "scaley")
+                        if (!List.of("rotate", "translate", "translatex", "translatey", "scale", "scalex", "scaley", "shear", "shearx", "sheary")
                                 .contains(te.getKey()))
                             continue;
                         if (!te.getValue().isArray())
                             throw ProjectCodec.bad(q + "." + te.getKey(), "Expected key array");
                         int k = 0;
-                        boolean pair = te.getKey().equals("translate") || te.getKey().equals("scale");
+                        boolean pair = te.getKey().equals("translate") || te.getKey().equals("scale") || te.getKey().equals("shear");
                         for (var key : te.getValue()) {
                             if (pair)
                                 allowed(key, q + "." + te.getKey() + "[" + k++ + "]", errors, "time", "x", "y",

@@ -48,6 +48,14 @@ public final class Picker {
                     return Optional.of(draw.attachmentId());
             }
         }
+        for (var slot : pose.drawSlots().isEmpty() ? d.slots() : pose.drawSlots()) {
+            var polygon = pose.bounds().get(slot.activeAttachmentId());
+            if (polygon == null) continue;
+            for (int i = 0; i < polygon.triangles().size(); i += 3)
+                if (MeshTopology.insideTriangle(world, polygon.vertices().get(polygon.triangles().get(i)),
+                        polygon.vertices().get(polygon.triangles().get(i+1)), polygon.vertices().get(polygon.triangles().get(i+2)), true))
+                    return Optional.of(slot.activeAttachmentId());
+        }
         return Optional.empty();
     }
 

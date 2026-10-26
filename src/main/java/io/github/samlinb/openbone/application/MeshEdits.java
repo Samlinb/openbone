@@ -33,7 +33,11 @@ public final class MeshEdits {
         }
         if (next.stream().noneMatch(a -> a.id().equals(id)))
             throw new IllegalArgumentException("Attachment identity cannot change");
-        return new DocumentSnapshot(d.bones(), d.slots(), next, d.animations(), d.constraints(), d.resources());
+        var resources = d.resources();
+        if (previous instanceof MeshAttachment p && replacement instanceof MeshAttachment n
+                && (p.vertices().size() != n.vertices().size() || p.hull() != n.hull() || !p.triangles().equals(n.triangles())))
+            resources = resources.withMetadata(resources.metadata().withoutEdges(id));
+        return new DocumentSnapshot(d.bones(), d.slots(), next, d.animations(), d.constraints(), resources);
     }
 
     public static DocumentSnapshot convert(DocumentSnapshot d, EntityId id) {

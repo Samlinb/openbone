@@ -79,6 +79,7 @@ public final class AnimationEdits {
                 d = put(d, clip, bone, c, time, switch (c) {
                     case TRANSLATE -> List.of(absolute.x() - s.x(), absolute.y() - s.y());
                     case ROTATE -> List.of(absolute.rotation() - s.rotation());
+                    case SHEAR -> List.of(absolute.shearX() - s.shearX(), absolute.shearY() - s.shearY());
                     case SCALE -> List.of(factor(absolute.scaleX(), s.scaleX()), factor(absolute.scaleY(), s.scaleY()));
                 });
         return d;

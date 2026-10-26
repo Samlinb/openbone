@@ -49,13 +49,23 @@ public final class EditorEdits {
     }
 
     public static Affine2 world(DocumentSnapshot d, EntityId id) {
+        id = transformId(d, id);
+        for (var b : d.bones()) if (b.id().equals(id))
+            return BoneInheritance.world(b.inherit(), parent(d, id), b.local(), b.local().matrix());
         return parent(d, id).multiply(local(d, id).matrix());
+    }
+
+    private static Transform fromWorld(DocumentSnapshot d, EntityId id, Affine2 matrix) {
+        id = transformId(d, id);
+        for (var b : d.bones()) if (b.id().equals(id))
+            return b.parentId() == null ? matrix.toTransformOrThrow() : BoneInheritance.local(b.inherit(), parent(d, id), matrix);
+        return parent(d, id).inverseOrThrow().multiply(matrix).toTransformOrThrow();
     }
 
     public static DocumentSnapshot transform(DocumentSnapshot d, EntityId selected, Transform value, Space space) {
         EntityId id = transformId(d, selected);
         Transform t = space == Space.LOCAL ? value
-                : parent(d, id).inverseOrThrow().multiply(value.matrix()).toTrsOrThrow();
+                : fromWorld(d, id, value.matrix());
         for (var a : d.attachments())
             if (a.id().equals(id)) {
                 if (!(a instanceof RegionAttachment))
@@ -75,29 +85,27 @@ public final class EditorEdits {
             var w = world(d, id);
             p = parent(d, id).inverseOrThrow().apply(w.tx() + delta.x(), w.ty() + delta.y());
         }
-        return transform(d, id, new Transform(p.x(), p.y(), t.rotation(), t.scaleX(), t.scaleY()), Space.LOCAL);
+        return transform(d, id, new Transform(p.x(), p.y(), t.rotation(), t.scaleX(), t.scaleY(), t.shearX(), t.shearY()), Space.LOCAL);
     }
 
     public static DocumentSnapshot rotate(DocumentSnapshot d, EntityId id, double degrees, Space space) {
         var t = local(d, id);
         if (space == Space.LOCAL)
-            return transform(d, id, new Transform(t.x(), t.y(), t.rotation() + degrees, t.scaleX(), t.scaleY()), space);
+            return transform(d, id, new Transform(t.x(), t.y(), t.rotation() + degrees, t.scaleX(), t.scaleY(), t.shearX(), t.shearY()), space);
         var w = world(d, id);
         var rotation = new Transform(0, 0, degrees, 1, 1).matrix();
         var linear = new Affine2(w.a(), w.b(), w.c(), w.d(), 0, 0);
         var next = rotation.multiply(linear);
-        var local = parent(d, id).inverseOrThrow()
-                .multiply(new Affine2(next.a(), next.b(), next.c(), next.d(), w.tx(), w.ty())).toTrsOrThrow();
+        var local = fromWorld(d, id, new Affine2(next.a(), next.b(), next.c(), next.d(), w.tx(), w.ty()));
         return transform(d, id, local, Space.LOCAL);
     }
 
     public static DocumentSnapshot scale(DocumentSnapshot d, EntityId id, double sx, double sy, Space space) {
         var t = local(d, id);
         if (space == Space.LOCAL)
-            return transform(d, id, new Transform(t.x(), t.y(), t.rotation(), t.scaleX() * sx, t.scaleY() * sy), space);
+            return transform(d, id, new Transform(t.x(), t.y(), t.rotation(), t.scaleX() * sx, t.scaleY() * sy, t.shearX(), t.shearY()), space);
         var w = world(d, id);
-        var local = parent(d, id).inverseOrThrow()
-                .multiply(new Affine2(sx * w.a(), sx * w.b(), sy * w.c(), sy * w.d(), w.tx(), w.ty())).toTrsOrThrow();
+        var local = fromWorld(d, id, new Affine2(sx * w.a(), sx * w.b(), sy * w.c(), sy * w.d(), w.tx(), w.ty()));
         return transform(d, id, local, Space.LOCAL);
     }
 

@@ -777,7 +777,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
     @Override
     public boolean prepareMesh() {
         if (animation.animate() && model().attachments().stream().anyMatch(
-                a -> a.id().equals(selected()) && (a instanceof ClippingAttachment || a instanceof PathAttachment))) {
+                a -> a.id().equals(selected()) && (a instanceof ClippingAttachment || a instanceof PathAttachment || a instanceof BoundingBoxAttachment))) {
             message(m("editorframe.0073"));
             return false;
         }
@@ -789,6 +789,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         boolean animate = animation.animate();
         double time = animation.time();
         return Commands.model(d -> {
+            if (d.attachment(id) instanceof BoundingBoxAttachment) return BoundingBoxEdits.moveWorld(d, id, index, target);
             if (d.attachments().stream().anyMatch(a -> a.id().equals(id) && a instanceof PathAttachment))
                 return PathEdits.moveWorld(d, id, index, target);
             if (d.attachments().stream().anyMatch(a -> a.id().equals(id) && a instanceof ClippingAttachment))
@@ -844,9 +845,9 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             if (id != null)
                 try {
                     var t = viewport.space() == Space.LOCAL ? EditorEdits.local(displayModel(), id)
-                            : EditorEdits.world(displayModel(), id).toTrsOrThrow();
-                    String[] keys = { "x", "y", "rotation", "scaleX", "scaleY" };
-                    double[] values = { t.x(), t.y(), t.rotation(), t.scaleX(), t.scaleY() };
+                            : EditorEdits.world(displayModel(), id).toTransformOrThrow();
+                    String[] keys = { "x", "y", "rotation", "scaleX", "scaleY", "shearX", "shearY" };
+                    double[] values = { t.x(), t.y(), t.rotation(), t.scaleX(), t.scaleY(), t.shearX(), t.shearY() };
                     for (int i = 0; i < keys.length; i++)
                         if (named.get("property." + keys[i]) instanceof JTextField f && !f.isFocusOwner())
                             f.setText(number(values[i]));
@@ -960,7 +961,15 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             field("length", m("editorframe.0098"), number(b.length()), value -> {
                 double v = parse(value);
                 edit(m("editorframe.0099"),
-                        d -> ModelEdits.editBone(d, id, a -> new Bone(a.id(), a.name(), a.parentId(), a.local(), v)));
+                        d -> ModelEdits.editBone(d, id, a -> new Bone(a.id(), a.name(), a.parentId(), a.local(), v, a.color(), a.inherit())));
+            });
+            field("bone.color", m("attachment.color"), b.color().hex(), value -> edit(m("attachment.color"), d -> ModelEdits.editBone(d,id,
+                    a -> new Bone(a.id(),a.name(),a.parentId(),a.local(),a.length(),Rgba.parse(value),a.inherit()))));
+            var inherit = new JComboBox<>(Bone.Inherit.values()); inherit.setName("property.bone.inherit");
+            inherit.setSelectedItem(b.inherit()); named.put(inherit.getName(), inherit); row(m("bone.inherit"), inherit);
+            inherit.addActionListener(e -> {
+                if (!refreshing) guard(() -> edit(m("bone.inherit"), d -> ModelEdits.editBone(d,id,
+                        a -> new Bone(a.id(),a.name(),a.parentId(),a.local(),a.length(),a.color(),(Bone.Inherit)inherit.getSelectedItem()))));
             });
             text(m("editorframe.0100")
                     + (b.parentId() == null ? m("editorframe.0101") : model().bone(b.parentId()).name()));
@@ -971,6 +980,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             propertyButton(m("editorframe.0048"), this::createTwoIk);
             propertyButton(m("editorframe.0049"), this::createTransformConstraint);
             propertyButton(m("editorframe.0050"), this::createPathAttachment);
+            propertyButton(m("boundingbox.create"), this::createBoundingBox);
             propertyButton(m("editorframe.0051"), this::createPathConstraint);
             propertyButton(m("editorframe.0052"), this::createPhysicsConstraint);
         } else if (s != null) {
@@ -1006,6 +1016,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             propertyButton(m("editorframe.0112"), () -> edit(m("editorframe.0111"), d -> EditorEdits.order(d, id, -1)));
             propertyButton(m("editorframe.0041"), this::importImage);
             propertyButton(m("editorframe.0046"), this::createClipping);
+            propertyButton(m("boundingbox.create"), this::createBoundingBox);
             text(m("editorframe.0113"));
         } else if (r != null) {
             field("name", m("editorframe.0096"), r.name(),
@@ -1037,6 +1048,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             meshProperties(mesh);
         } else if (clipping != null) {
             clippingProperties(clipping);
+        } else if (attachment instanceof BoundingBoxAttachment box) {
+            boundingBoxProperties(box);
         } else if (attachment instanceof PathAttachment path) {
             pathProperties(path);
         }
@@ -1636,7 +1649,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         EntityId id = c.id();
         title(m("editorframe.0222"));
         field("name", m("editorframe.0096"), c.name(), value -> edit(m("editorframe.0223"), d -> ClippingEdits.edit(d,
-                id, a -> new ClippingAttachment(a.id(), value, a.slotId(), a.vertices(), a.endSlotId()))));
+                id, a -> new ClippingAttachment(a.id(), value, a.slotId(), a.vertices(), a.endSlotId(), a.color()))));
+        field("clip.color", m("attachment.color"), c.color().hex(), value -> edit(m("attachment.color"), d -> ClippingEdits.edit(d, id, a -> new ClippingAttachment(a.id(), a.name(), a.slotId(), a.vertices(), a.endSlotId(), Rgba.parse(value)))));
         text(m("editorframe.0224"));
         var ends = new JComboBox<Choice>();
         ends.addItem(new Choice(null, m("editorframe.0225")));
@@ -1662,7 +1676,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                 return;
             boolean focused = ends.isFocusOwner();
             guard(() -> edit(m("editorframe.0227"), d -> ClippingEdits.edit(d, id,
-                    a -> new ClippingAttachment(a.id(), a.name(), a.slotId(), a.vertices(), end))));
+                    a -> new ClippingAttachment(a.id(), a.name(), a.slotId(), a.vertices(), end, a.color()))));
             if (focused && named.containsKey("property.clip.end"))
                 named.get("property.clip.end").requestFocusInWindow();
         };
@@ -1774,6 +1788,47 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                     state -> new EditorState(ClippingEdits.add(state.model(), slot, clip, insertion),
                             Selection.of(clip.id())));
         });
+    }
+
+    private void createBoundingBox() {
+        if (!setupOnly()) return;
+        viewportCancel();
+        var bone = selectedBone();
+        if (bone == null) { message(m("editorframe.0239")); return; }
+        var name = new JTextField("boundingbox"); name.setName("boundingbox.name");
+        var rows = clipRows(List.of(new Vec2(-50,-50),new Vec2(50,-50),new Vec2(50,50),new Vec2(-50,50)));
+        var body = new JPanel(new BorderLayout(6,6)); body.add(name,BorderLayout.NORTH); body.add(new JScrollPane(rows));
+        if (JOptionPane.showConfirmDialog(this,body,m("boundingbox.create"),JOptionPane.OK_CANCEL_OPTION,JOptionPane.PLAIN_MESSAGE) != JOptionPane.OK_OPTION) return;
+        guard(() -> {
+            var slot = new Slot(EntityId.create(), unique("boundingbox",model().slots().stream().map(Slot::name).toList()),bone.id(),null);
+            var box = new BoundingBoxAttachment(EntityId.create(),name.getText().strip(),slot.id(),readClipRows(rows.getText()),BoundingBoxAttachment.DEFAULT_COLOR);
+            execute(m("boundingbox.create"), state -> new EditorState(ModelEdits.addAttachment(ModelEdits.addSlot(state.model(),slot),box,true),Selection.of(box.id())));
+        });
+    }
+
+    private void boundingBoxProperties(BoundingBoxAttachment box) {
+        var id = box.id();
+        title(m("boundingbox.title"));
+        field("name",m("editorframe.0096"),box.name(),value -> edit(m("editorframe.0097"),d -> MeshEdits.replace(d,id,a -> new BoundingBoxAttachment(a.id(),value,a.slotId(),((BoundingBoxAttachment)a).vertices(),((BoundingBoxAttachment)a).color()))));
+        field("boundingbox.color",m("attachment.color"),box.color().hex(),value -> edit(m("attachment.color"),d -> MeshEdits.replace(d,id,a -> new BoundingBoxAttachment(a.id(),a.name(),a.slotId(),((BoundingBoxAttachment)a).vertices(),Rgba.parse(value)))));
+        propertyButton(viewport.meshEditing() ? m("editorframe.0159") : m("editorframe.0160"), () -> viewport.meshEditing(!viewport.meshEditing()));
+        int index = Math.max(0,Math.min(box.vertices().size()-1,viewport.meshIndex())); var point = box.vertices().get(index);
+        field("boundingbox.index",m("editorframe.0228"),Integer.toString(index),value -> {
+            int n = Integer.parseInt(value.strip());
+            if (n < 0 || n >= box.vertices().size()) throw new IllegalArgumentException(m("editorframe.0229"));
+            viewport.meshIndex(n);
+        });
+        field("boundingbox.x","X",number(point.x()),value -> edit(m("editorframe.0230"),d -> BoundingBoxEdits.vertex(d,id,index,new Vec2(parse(value),point.y()))));
+        field("boundingbox.y","Y",number(point.y()),value -> edit(m("editorframe.0231"),d -> BoundingBoxEdits.vertex(d,id,index,new Vec2(point.x(),parse(value)))));
+        propertyButton(m("editorframe.0232"), () -> {
+            var rows = clipRows(box.vertices());
+            if (JOptionPane.showConfirmDialog(this,new JScrollPane(rows),m("editorframe.0237"),JOptionPane.OK_CANCEL_OPTION,JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION)
+                guard(() -> edit(m("editorframe.0238"),d -> BoundingBoxEdits.vertices(d,id,readClipRows(rows.getText()))));
+        });
+        propertyButton(m("editorframe.0233"), () -> edit(m("editorframe.0234"), d -> {
+            var vertices = new ArrayList<>(BoundingBoxEdits.box(d,id).vertices()); vertices.remove(index);
+            return BoundingBoxEdits.vertices(d,id,vertices);
+        }));
     }
 
     private void meshProperties(MeshAttachment m) {
@@ -1989,7 +2044,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         Transform t = EditorEdits.local(displayModel(), id);
         if (viewport.space() == Space.WORLD) {
             try {
-                t = EditorEdits.world(displayModel(), id).toTrsOrThrow();
+                t = EditorEdits.world(displayModel(), id).toTransformOrThrow();
             } catch (IllegalArgumentException e) {
                 text(m("editorframe.0289"));
                 return;
@@ -1997,20 +2052,21 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         }
         text(viewport.space() == Space.LOCAL ? m("editorframe.0290") : m("editorframe.0291"));
         Transform initial = t;
-        double[] values = { t.x(), t.y(), t.rotation(), t.scaleX(), t.scaleY() };
-        String[] keys = { "x", "y", "rotation", "scaleX", "scaleY" },
-                labels = { "X", "Y", m("editorframe.0292"), m("editorframe.0203"), m("editorframe.0204") };
-        JTextField[] fields = new JTextField[5];
+        double[] values = { t.x(), t.y(), t.rotation(), t.scaleX(), t.scaleY(), t.shearX(), t.shearY() };
+        String[] keys = { "x", "y", "rotation", "scaleX", "scaleY", "shearX", "shearY" },
+                labels = { "X", "Y", m("editorframe.0292"), m("editorframe.0203"), m("editorframe.0204"), m("transform.shearX"), m("transform.shearY") };
+        JTextField[] fields = new JTextField[7];
         int revision = propertyRevision;
         Runnable apply = () -> {
             if (refreshing || propertyRevision != revision)
                 return;
             guard(() -> {
                 Transform value = new Transform(parse(fields[0].getText()), parse(fields[1].getText()),
-                        parse(fields[2].getText()), parse(fields[3].getText()), parse(fields[4].getText()));
+                        parse(fields[2].getText()), parse(fields[3].getText()), parse(fields[4].getText()), parse(fields[5].getText()), parse(fields[6].getText()));
                 if (value.equals(initial))
                     return;
                 Set<Channel> channels = EnumSet.noneOf(Channel.class);
+                if (value.shearX() != initial.shearX() || value.shearY() != initial.shearY()) channels.add(Channel.SHEAR);
                 if (value.x() != initial.x() || value.y() != initial.y())
                     channels.add(Channel.TRANSLATE);
                 if (value.rotation() != initial.rotation())
@@ -2021,7 +2077,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                         transformEdit(d -> EditorEdits.transform(d, id, value, viewport.space()), channels));
             });
         };
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < fields.length; i++) {
             var f = new JTextField(number(values[i]));
             fields[i] = f;
             f.setEnabled(!animation.playing());

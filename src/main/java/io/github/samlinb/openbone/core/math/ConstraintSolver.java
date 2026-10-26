@@ -30,6 +30,7 @@ public final class ConstraintSolver {
         Map<EntityId, Affine2> locked = new HashMap<>();
         for (var b : bones)
             local.put(b.id(), pose.getOrDefault(b.id(), b.local()));
+        local.forEach((id, t) -> shear.put(id, t.shearY()));
         var world = new LinkedHashMap<EntityId, Affine2>();
         rebuild(bones, local, world, shear, locked);
         for (var c : constraints) {
@@ -149,7 +150,7 @@ public final class ConstraintSolver {
             // the zero second segment/axis case rather than claiming runtime equality.
             single(parent, local, world, new IkConstraint(ik.id(), ik.name(), ik.order(), true, List.of(parent.id()),
                     ik.targetId(), ik.mix(), 0, ik.bendPositive(), false, ik.stretch(), false));
-            local.put(child.id(), new Transform(c.x(), cy, 0, c.scaleX(), c.scaleY()));
+            local.put(child.id(), new Transform(c.x(), cy, 0, c.scaleX(), c.scaleY(), c.shearX(), c.shearY()));
             return;
         }
         double radius = Finite.require(Math.hypot(tx, ty), "IK2 target radius");
@@ -192,9 +193,9 @@ public final class ConstraintSolver {
         double parentAngle = Math.toDegrees(angles.parent() - offset) + (p.scaleX() < 0 ? 180 : 0);
         double childAngle = Math.toDegrees(angles.child() + offset) * orientation + (c.scaleX() < 0 ? 180 : 0);
         local.put(parent.id(), new Transform(p.x(), p.y(), p.rotation() + delta(parentAngle, p.rotation()) * ik.mix(),
-                scaleX, scaleY));
+                scaleX, scaleY, p.shearX(), p.shearY()));
         local.put(child.id(), new Transform(c.x(), cy, c.rotation() + delta(childAngle, c.rotation()) * ik.mix(),
-                c.scaleX(), c.scaleY()));
+                c.scaleX(), c.scaleY(), c.shearX(), c.shearY()));
     }
 
     private static void rebuild(List<Bone> bones, Map<EntityId, Transform> local, Map<EntityId, Affine2> world,
@@ -207,12 +208,13 @@ public final class ConstraintSolver {
             var t = local.get(b.id());
             var matrix = t.matrix();
             double shy = shear.getOrDefault(b.id(), 0.0);
-            if (shy != 0) {
+            if (shy != t.shearY()) {
                 double angle = Math.toRadians((t.rotation() % 360 + 90 + shy % 360) % 360);
                 matrix = new Affine2(matrix.a(), Math.cos(angle) * t.scaleY(), matrix.c(), Math.sin(angle) * t.scaleY(),
                         t.x(), t.y());
             }
-            world.put(b.id(), b.parentId() == null ? matrix : world.get(b.parentId()).multiply(matrix));
+            world.put(b.id(), b.parentId() == null ? matrix
+                    : BoneInheritance.world(b.inherit(), world.get(b.parentId()), t, matrix));
         }
     }
 

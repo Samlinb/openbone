@@ -84,9 +84,10 @@ public final class AnimationSampler {
             var s = b.local();
             result.put(b.id(), switch (track.channel()) {
                 case TRANSLATE ->
-                    new Transform(s.x() + v.get(0), s.y() + v.get(1), t.rotation(), t.scaleX(), t.scaleY());
-                case ROTATE -> new Transform(t.x(), t.y(), s.rotation() + v.get(0), t.scaleX(), t.scaleY());
-                case SCALE -> new Transform(t.x(), t.y(), t.rotation(), s.scaleX() * v.get(0), s.scaleY() * v.get(1));
+                    new Transform(s.x() + v.get(0), s.y() + v.get(1), t.rotation(), t.scaleX(), t.scaleY(), t.shearX(), t.shearY());
+                case ROTATE -> new Transform(t.x(), t.y(), s.rotation() + v.get(0), t.scaleX(), t.scaleY(), t.shearX(), t.shearY());
+                case SCALE -> new Transform(t.x(), t.y(), t.rotation(), s.scaleX() * v.get(0), s.scaleY() * v.get(1), t.shearX(), t.shearY());
+                case SHEAR -> new Transform(t.x(), t.y(), t.rotation(), t.scaleX(), t.scaleY(), s.shearX() + v.get(0), s.shearY() + v.get(1));
             });
         }
         return Collections.unmodifiableMap(result);

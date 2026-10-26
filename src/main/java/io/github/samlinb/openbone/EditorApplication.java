@@ -11,6 +11,14 @@ public final class EditorApplication {
     private EditorApplication() {
     }
 
+    private static String version() {
+        try (var input = EditorApplication.class.getResourceAsStream("/META-INF/maven/io.github.samlinb.openbone/openbone/pom.properties")) {
+            if (input == null) return "dev";
+            var properties = new java.util.Properties(); properties.load(input);
+            return properties.getProperty("version", "dev");
+        } catch (java.io.IOException unavailable) { return "dev"; }
+    }
+
     public static void main(String[] args) {
         // Keep Swing's Windows surfaces on the software/GDI pipeline alongside the
         // heavyweight
@@ -29,7 +37,7 @@ public final class EditorApplication {
         }
         if (args.length == 1 && "--version".equals(args[0])) {
             System.out
-                    .println("Openbone 0.1.0");
+                    .println("Openbone " + version());
             return;
         }
         if (args.length == 2 && "--validate-project".equals(args[0])) {

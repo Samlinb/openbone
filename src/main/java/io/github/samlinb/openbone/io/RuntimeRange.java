@@ -36,6 +36,7 @@ public final class RuntimeRange {
         number(t.x(), p + ".x");
         number(t.y(), p + ".y");
         rotation(t.rotation(), p + ".rotation");
+        rotation(t.shearX(), p + ".shearX"); rotation(t.shearY(), p + ".shearY");
         number(t.scaleX(), p + ".scaleX");
         number(t.scaleY(), p + ".scaleY");
     }
@@ -177,6 +178,10 @@ public final class RuntimeRange {
                     number(v, "path stored length");
                 continue;
             }
+            if (a instanceof BoundingBoxAttachment box) {
+                for (var v : box.vertices()) { number(v.x(), "boundingbox.x"); number(v.y(), "boundingbox.y"); }
+                continue;
+            }
             if (a instanceof ClippingAttachment c) {
                 List<io.github.samlinb.openbone.core.math.Vec2> transmitted = new ArrayList<>();
                 for (var v : c.vertices()) {
@@ -274,7 +279,7 @@ public final class RuntimeRange {
                     for (int c = 0; c < t.channel().components(); c++) {
                         double v = k.values().get(c);
                         number(v, "key value");
-                        if (t.channel() == Channel.ROTATE)
+                        if (t.channel() == Channel.ROTATE || t.channel() == Channel.SHEAR)
                             rotation(v, "rotation key");
                         if (i + 1 < t.keys().size()) {
                             var next = t.keys().get(i + 1);
@@ -338,16 +343,17 @@ public final class RuntimeRange {
         for (var b : d.bones()) {
             var t = b.local();
             local.put(b.id(), new double[] { Math.abs(t.x()), Math.abs(t.y()), Math.abs(t.rotation()),
-                    Math.abs(t.scaleX()), Math.abs(t.scaleY()) });
+                    Math.abs(t.scaleX()), Math.abs(t.scaleY()), Math.abs(t.shearX()), Math.abs(t.shearY()) });
         }
         if (clip != null)
             for (var t : clip.timelines()) {
                 var s = d.bone(t.boneId()).local();
-                double[] setup = { s.x(), s.y(), s.rotation(), s.scaleX(), s.scaleY() }, v = local.get(t.boneId());
+                double[] setup = { s.x(), s.y(), s.rotation(), s.scaleX(), s.scaleY(), s.shearX(), s.shearY() }, v = local.get(t.boneId());
                 int offset = switch (t.channel()) {
                     case TRANSLATE -> 0;
                     case ROTATE -> 2;
                     case SCALE -> 3;
+                    case SHEAR -> 5;
                 };
                 for (int i = 0; i < t.keys().size(); i++)
                     for (int c = 0; c < t.channel().components(); c++) {
@@ -364,7 +370,7 @@ public final class RuntimeRange {
                             double absolute = t.channel() == Channel.SCALE ? setup[offset + c] * point
                                     : setup[offset + c] + point;
                             number(absolute, "animated local pose");
-                            if (t.channel() == Channel.ROTATE)
+                            if (t.channel() == Channel.ROTATE || t.channel() == Channel.SHEAR)
                                 rotation(absolute, "animated rotation");
                             v[offset + c] = Math.max(v[offset + c], Math.abs(absolute));
                         }
@@ -573,7 +579,7 @@ public final class RuntimeRange {
                     world.put(b.id(), worldOverrides.get(b.id()));
                     continue;
                 }
-                double norm = linear(p[0], Math.max(v[3], v[4]) * (shearedLocal.contains(b.id()) ? Math.sqrt(2) : 1));
+                double norm = linear(p[0], Math.max(v[3], v[4]) * (shearedLocal.contains(b.id()) || v[5] != 0 || v[6] != 0 ? Math.sqrt(2) : 1));
                 double pos = position(p[0], p[1], v[0], v[1]);
                 number(pos + norm * b.length(), "world bone tip " + b.name());
                 world.put(b.id(), new double[] { norm, pos });
@@ -586,6 +592,11 @@ public final class RuntimeRange {
                 var p = world.get(slots.get(path.slotId()).boneId());
                 for (var v : path.vertices())
                     position(p[0], p[1], v.x(), v.y());
+                continue;
+            }
+            if (a instanceof BoundingBoxAttachment box) {
+                var p = world.get(slots.get(box.slotId()).boneId());
+                for (var v : box.vertices()) position(p[0], p[1], v.x(), v.y());
                 continue;
             }
             if (a instanceof ClippingAttachment c) {

@@ -246,7 +246,7 @@ final class ClipFloatCertificate {
         Map<EntityId, M> bones = new HashMap<>(), locals = new HashMap<>();
         for (var bone : d.bones()) {
             var s = bone.local();
-            I x = I.f(s.x()), y = I.f(s.y()), r = I.f(s.rotation()), sx = I.f(s.scaleX()), sy = I.f(s.scaleY());
+            I x = I.f(s.x()), y = I.f(s.y()), r = I.f(s.rotation()), sx = I.f(s.scaleX()), sy = I.f(s.scaleY()), shx = I.f(s.shearX()), shy = I.f(s.shearY());
             if (clip != null)
                 for (var track : clip.timelines())
                     if (track.boneId().equals(bone.id())) {
@@ -256,13 +256,15 @@ final class ClipFloatCertificate {
                                 y = y.add(range(track.keys(), 1, from, to, I.f(0)));
                             }
                             case ROTATE -> r = r.add(range(track.keys(), 0, from, to, I.f(0)));
+                            case SHEAR -> { shx = shx.add(range(track.keys(),0,from,to,I.f(0))); shy = shy.add(range(track.keys(),1,from,to,I.f(0))); }
                             case SCALE -> {
                                 sx = sx.mul(range(track.keys(), 0, from, to, I.f(1)));
                                 sy = sy.mul(range(track.keys(), 1, from, to, I.f(1)));
                             }
                         }
                     }
-            M m = matrix(x, y, r, sx, sy);
+            M mx = matrix(x, y, r.add(shx), sx, sy), my = matrix(x, y, r.add(shy), sx, sy);
+            M m = new M(mx.a, my.b, mx.c, my.d, x, y);
             locals.put(bone.id(), m);
             bones.put(bone.id(), bone.parentId() == null ? m : bones.get(bone.parentId()).child(m));
         }
@@ -328,7 +330,7 @@ final class ClipFloatCertificate {
                 }
                 continue;
             }
-            if (active != null && !empty && attachment != null) {
+            if (active != null && !empty && (attachment instanceof RegionAttachment || attachment instanceof MeshAttachment)) {
                 List<P> points;
                 List<Integer> triangles;
                 double uv = 1;

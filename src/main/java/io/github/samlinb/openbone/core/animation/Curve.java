@@ -26,7 +26,7 @@ public record Curve(Kind kind, double x1, double y1, double x2, double y2) {
         Finite.require(y1, "curve y1");
         Finite.require(x2, "curve x2");
         Finite.require(y2, "curve y2");
-        if (x1 < 0 || x2 > 1 || x1 > x2)
+        if (x1 < 0 || x1 > 1 || x2 < 0 || x2 > 1)
             throw new IllegalArgumentException(m("curve.0001"));
         if (kind != Kind.BEZIER && (x1 != 0 || y1 != 0 || x2 != 1 || y2 != 1))
             throw new IllegalArgumentException(m("curve.0002"));

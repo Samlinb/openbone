@@ -83,7 +83,7 @@ public final class ModelEdits {
             var attachments = new ArrayList<>(d.attachments());
             attachments.add(attachment);
             var next = new DocumentSnapshot(d.bones(), d.slots(), attachments, d.animations(), d.constraints(),
-                    new Resources(skins, d.resources().activeSkin(), d.resources().events(), d.resources().atlas()));
+                    new Resources(skins, d.resources().activeSkin(), d.resources().events(), d.resources().atlas(), d.resources().metadata()));
             return makeActive ? editSlot(next, attachment.slotId(), s -> s.withActiveAttachment(attachment.id()))
                     : next;
         }
@@ -123,7 +123,7 @@ public final class ModelEdits {
         Vec2 local = parent.inverseOrThrow().apply(target.x(), target.y());
         Transform t = bone.local();
         return editBone(d, id,
-                b -> b.withLocal(new Transform(local.x(), local.y(), t.rotation(), t.scaleX(), t.scaleY())));
+                b -> b.withLocal(new Transform(local.x(), local.y(), t.rotation(), t.scaleX(), t.scaleY(), t.shearX(), t.shearY())));
     }
 
     public static DocumentSnapshot reparent(DocumentSnapshot d, EntityId id, EntityId parent, ReparentPolicy policy) {
@@ -137,7 +137,8 @@ public final class ModelEdits {
             return topology;
         var world = d.evaluateWorld().bones();
         Affine2 parentWorld = parent == null ? Affine2.IDENTITY : world.get(parent).matrix();
-        Transform local = parentWorld.inverseOrThrow().multiply(world.get(id).matrix()).toTrsOrThrow();
+        Transform local = parent == null ? world.get(id).matrix().toTransformOrThrow()
+                : BoneInheritance.local(bone.inherit(), parentWorld, world.get(id).matrix());
         return editBone(d, id, b -> b.withParent(parent, local));
     }
 

@@ -9,7 +9,11 @@ import static io.github.samlinb.openbone.i18n.M.m;
  */
 public record WorldPose(Map<EntityId, BoneWorld> bones, Map<EntityId, RegionWorld> regions,
         Map<EntityId, MeshWorld> meshes, Map<EntityId, PolygonWorld> clips, Map<EntityId, List<Vec2>> paths,
-        List<Slot> drawSlots) {
+        List<Slot> drawSlots, Map<EntityId, PolygonWorld> bounds) {
+    public WorldPose(Map<EntityId, BoneWorld> bones, Map<EntityId, RegionWorld> regions,
+            Map<EntityId, MeshWorld> meshes, Map<EntityId, PolygonWorld> clips, Map<EntityId, List<Vec2>> paths, List<Slot> drawSlots) {
+        this(bones, regions, meshes, clips, paths, drawSlots, Map.of());
+    }
     public WorldPose(Map<EntityId, BoneWorld> bones, Map<EntityId, RegionWorld> regions,
             Map<EntityId, MeshWorld> meshes, Map<EntityId, PolygonWorld> clips, Map<EntityId, List<Vec2>> paths) {
         this(bones, regions, meshes, clips, paths, List.of());
@@ -60,6 +64,7 @@ public record WorldPose(Map<EntityId, BoneWorld> bones, Map<EntityId, RegionWorl
         regions = Collections.unmodifiableMap(new LinkedHashMap<>(regions));
         meshes = Collections.unmodifiableMap(new LinkedHashMap<>(meshes));
         clips = Collections.unmodifiableMap(new LinkedHashMap<>(clips));
+        bounds = Collections.unmodifiableMap(new LinkedHashMap<>(bounds));
         var copied = new LinkedHashMap<EntityId, List<Vec2>>();
         paths.forEach((id, v) -> copied.put(id, List.copyOf(v)));
         paths = Collections.unmodifiableMap(copied);
@@ -77,13 +82,13 @@ public record WorldPose(Map<EntityId, BoneWorld> bones, Map<EntityId, RegionWorl
     @Override
     public boolean equals(Object other) {
         return other instanceof WorldPose p && bones.equals(p.bones) && regions.equals(p.regions)
-                && meshes.equals(p.meshes) && clips.equals(p.clips) && paths.equals(p.paths)
+                && meshes.equals(p.meshes) && clips.equals(p.clips) && paths.equals(p.paths) && bounds.equals(p.bounds)
                 && drawIdentity().equals(p.drawIdentity());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(bones, regions, meshes, clips, paths, drawIdentity());
+        return Objects.hash(bones, regions, meshes, clips, paths, bounds, drawIdentity());
     }
 
     static WorldPose evaluate(List<Bone> setup, List<Slot> slots, List<Attachment> attachments,
@@ -120,9 +125,15 @@ public record WorldPose(Map<EntityId, BoneWorld> bones, Map<EntityId, RegionWorl
         Map<EntityId, RegionWorld> regions = new LinkedHashMap<>();
         Map<EntityId, MeshWorld> meshes = new LinkedHashMap<>();
         Map<EntityId, PolygonWorld> clips = new LinkedHashMap<>();
+        Map<EntityId, PolygonWorld> bounds = new LinkedHashMap<>();
         Map<EntityId, List<Vec2>> paths = new LinkedHashMap<>();
         Set<EntityId> remainingDeforms = new HashSet<>(deforms.keySet());
         for (Attachment attachment : attachments) {
+            if (attachment instanceof BoundingBoxAttachment box) {
+                var matrix = worlds.get(bySlot.get(box.slotId()).boneId()).matrix();
+                bounds.put(box.id(), new PolygonWorld(box.vertices().stream().map(p -> matrix.apply(p.x(), p.y())).toList(), box.triangles()));
+                continue;
+            }
             if (attachment instanceof PathAttachment p) {
                 var matrix = worlds.get(bySlot.get(p.slotId()).boneId()).matrix();
                 paths.put(p.id(), p.vertices().stream().map(v -> matrix.apply(v.x(), v.y())).toList());
@@ -177,6 +188,6 @@ public record WorldPose(Map<EntityId, BoneWorld> bones, Map<EntityId, RegionWorl
         }
         if (!remainingDeforms.isEmpty())
             throw new IllegalArgumentException("Unknown deform attachment IDs: " + remainingDeforms);
-        return new WorldPose(worlds, regions, meshes, clips, paths);
+        return new WorldPose(worlds, regions, meshes, clips, paths, List.of(), bounds);
     }
 }

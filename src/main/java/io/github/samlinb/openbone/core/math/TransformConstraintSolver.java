@@ -41,7 +41,7 @@ final class TransformConstraintSolver {
                         out[n] = Finite.require(from[n] + (to[n] - (c.relative() ? 0 : from[n]) + offset) * mix,
                                 "local transform component");
                 }
-                local.put(id, new Transform(out[1], out[2], out[0], out[3], out[4]));
+                local.put(id, new Transform(out[1], out[2], out[0], out[3], out[4], p.shearX(), out[5]));
                 shear.put(id, out[5]);
             }
             return;

@@ -1,7 +1,7 @@
 package io.github.samlinb.openbone.core.model;
 
 /** Extension boundary: new kinds must add explicit validation, codec and evaluation together. */
-public sealed interface Attachment permits RegionAttachment, MeshAttachment, ClippingAttachment,PathAttachment {
+public sealed interface Attachment permits RegionAttachment, MeshAttachment, ClippingAttachment,PathAttachment,BoundingBoxAttachment {
     EntityId id();
     String name();
     EntityId slotId();

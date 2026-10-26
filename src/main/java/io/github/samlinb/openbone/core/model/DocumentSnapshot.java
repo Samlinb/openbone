@@ -109,6 +109,11 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                         if (!byBone.containsKey(i.boneId()))
                             throw new IllegalArgumentException(m("documentsnapshot.0001") + i.boneId());
         }
+        resources.metadata().meshes().forEach((id, info) -> {
+            if (!(byAttachment.get(id) instanceof MeshAttachment mesh))
+                throw new IllegalArgumentException("Metadata references missing mesh");
+            info.validate(mesh);
+        });
         for (Slot slot : slots)
             if (slot.activeAttachmentId() != null) {
                 Attachment active = byAttachment.get(slot.activeAttachmentId());
@@ -291,7 +296,7 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             for (var b : bones) {
                 var s = b.local();
                 limits.put(b.id(), new double[] { Math.abs(s.x()), Math.abs(s.y()), Math.abs(s.rotation()),
-                        Math.abs(s.scaleX()), Math.abs(s.scaleY()) });
+                        Math.abs(s.scaleX()), Math.abs(s.scaleY()), Math.abs(s.shearX()), Math.abs(s.shearY()) });
             }
             Map<EntityId, Bone> byBone = new HashMap<>();
             bones.forEach(b -> byBone.put(b.id(), b));
@@ -302,8 +307,9 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                     case TRANSLATE -> 0;
                     case ROTATE -> 2;
                     case SCALE -> 3;
+                    case SHEAR -> 5;
                 };
-                double[] setup = { s.x(), s.y(), s.rotation(), s.scaleX(), s.scaleY() };
+                double[] setup = { s.x(), s.y(), s.rotation(), s.scaleX(), s.scaleY(), s.shearX(), s.shearY() };
                 for (int n = 0; n < track.keys().size(); n++)
                     for (int c = 0; c < track.channel().components(); c++) {
                         var key = track.keys().get(n);
@@ -461,7 +467,7 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                         continue;
                     }
                     double norm = linearNormBound(p[0],
-                            Math.max(v[3], v[4]) * (shearedLocal.contains(b.id()) ? Math.sqrt(2) : 1),
+                            Math.max(v[3], v[4]) * (shearedLocal.contains(b.id()) || v[5] != 0 || v[6] != 0 ? Math.sqrt(2) : 1),
                             "animation world scale bound");
                     double position = positionNormBound(p[0], p[1], v[0], v[1], "animation world position bound");
                     io.github.samlinb.openbone.core.math.Finite.require(position + norm * b.length(),
@@ -482,6 +488,11 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                     var p = world.get(bySlot.get(c.slotId()).boneId());
                     for (var v : c.vertices())
                         positionNormBound(p[0], p[1], v.x(), v.y(), "animation clip vertex bound");
+                    continue;
+                }
+                if (a instanceof BoundingBoxAttachment box) {
+                    var p = world.get(bySlot.get(box.slotId()).boneId());
+                    for (var v : box.vertices()) positionNormBound(p[0], p[1], v.x(), v.y(), "animation bounding box bound");
                     continue;
                 }
                 if (a instanceof MeshAttachment m) {
@@ -670,7 +681,7 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                 regions.put(a.id(), new WorldPose.RegionWorld(m,
                         List.of(m.apply(x, y), m.apply(x, y + h), m.apply(x + w, y + h), m.apply(x + w, y))));
             }
-        return new WorldPose(pose.bones(), regions, pose.meshes(), pose.clips(), pose.paths(), evaluated);
+        return new WorldPose(pose.bones(), regions, pose.meshes(), pose.clips(), pose.paths(), evaluated, pose.bounds());
     }
 
     public WorldPose evaluateWorld() {

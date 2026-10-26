@@ -53,7 +53,7 @@ final class PhysicsFloatCertificate {
   }
 
   private static M local(Transform t) {
-    float r = (float) t.rotation() * DEG, y = ((float) t.rotation() + 90) * DEG;
+    float r = ((float) t.rotation() + (float) t.shearX()) * DEG, y = ((float) t.rotation() + 90 + (float) t.shearY()) * DEG;
     return new M(cos(r) * (float) t.scaleX(), cos(y) * (float) t.scaleY(), sin(r) * (float) t.scaleX(),
         sin(y) * (float) t.scaleY(), (float) t.x(), (float) t.y());
   }
@@ -320,12 +320,13 @@ final class PhysicsFloatCertificate {
         continue;
       Float w = t.channel().components() == 2 ? FloatTimelineValue.sample(t.keys(), 1, time) : null;
       result.put(bone.id(), switch (t.channel()) {
+        case SHEAR -> new Transform(previous.x(), previous.y(), previous.rotation(), previous.scaleX(), previous.scaleY(), checked((float) setup.shearX() + v), checked((float) setup.shearY() + w));
         case TRANSLATE -> new Transform(checked((float) setup.x() + v), checked((float) setup.y() + w),
-            previous.rotation(), previous.scaleX(), previous.scaleY());
+            previous.rotation(), previous.scaleX(), previous.scaleY(), previous.shearX(), previous.shearY());
         case ROTATE -> new Transform(previous.x(), previous.y(), checked((float) setup.rotation() + v),
-            previous.scaleX(), previous.scaleY());
+            previous.scaleX(), previous.scaleY(), previous.shearX(), previous.shearY());
         case SCALE -> new Transform(previous.x(), previous.y(), previous.rotation(),
-            checked((float) setup.scaleX() * v), checked((float) setup.scaleY() * w));
+            checked((float) setup.scaleX() * v), checked((float) setup.scaleY() * w), previous.shearX(), previous.shearY());
       });
     }
     return result;

@@ -36,7 +36,7 @@ public final class VisibleGeometry {
                 }
                 continue;
             }
-            if (a != null && !(a instanceof PathAttachment)) {
+            if (a != null && !(a instanceof PathAttachment) && !(a instanceof BoundingBoxAttachment)) {
                 PolygonClipper.Geometry geometry;
                 if (a instanceof MeshAttachment m) {
                     var world = pose.meshes().get(m.id());

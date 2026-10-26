@@ -39,7 +39,14 @@ final class Spine38Json {
         ObjectNode root = input.deepCopy();
         fields(root, "$", warnings, "skeleton", "bones", "slots", "skins", "animations", "ik", "transform", "path", "events");
         ObjectNode meta = (ObjectNode)root.get("skeleton");
-        fields(meta, "$.skeleton", warnings, "spine", "images");
+        fields(meta, "$.skeleton", warnings, "spine", "images", "hash", "x", "y", "width", "height", "audio", "fps");
+        numbers(meta, "$.skeleton", warnings, "x", "y", "width", "height", "fps");
+        for (String key : List.of("hash", "audio")) if (meta.has(key) && (!meta.get(key).isTextual() || meta.get(key).textValue().length() > 4096)) {
+            warnings.add("$.skeleton." + key + ": invalid text filtered"); meta.remove(key);
+        }
+        for (String key : List.of("width", "height", "fps")) if (meta.path(key).asDouble() < 0) {
+            warnings.add("$.skeleton." + key + ": negative value filtered"); meta.remove(key);
+        }
         meta.put("spine", SkeletonJsonCodec.VERSION);
         if (meta.has("images") && !meta.get("images").isTextual()) meta.remove("images");
         String images = meta.path("images").asText();
@@ -52,10 +59,18 @@ final class Spine38Json {
         for (var b : input.path("bones")) {
             if (!b.isObject() || !validName(b.path("name"))) { warnings.add("$.bones: invalid bone filtered"); continue; }
             ObjectNode n = b.deepCopy();
-            if (n.path("transform").asText().equals("normal")) n.remove("transform");
+            rename(n, "transform", "inherit");
             fields(n, "$.bones." + n.path("name").asText(), warnings,
-                    "name", "parent", "x", "y", "rotation", "scaleX", "scaleY", "length");
-            numbers(n, "$.bones." + n.path("name").asText(), warnings, "x", "y", "rotation", "scaleX", "scaleY", "length");
+                    "name", "parent", "x", "y", "rotation", "scaleX", "scaleY", "length", "color", "inherit", "shearX", "shearY");
+            if (n.has("color")) try { Rgba.parse(n.get("color").textValue()); }
+            catch (IllegalArgumentException invalid) {
+                warnings.add("$.bones." + n.path("name").asText() + ".color: invalid bone color filtered"); n.remove("color");
+            }
+            if (n.has("inherit")) try { Bone.Inherit.valueOf(n.get("inherit").textValue()); }
+            catch (IllegalArgumentException | NullPointerException invalid) {
+                warnings.add("$.bones." + n.path("name").asText() + ".transform: invalid transform; using normal"); n.remove("inherit");
+            }
+            numbers(n, "$.bones." + n.path("name").asText(), warnings, "x", "y", "rotation", "scaleX", "scaleY", "length", "shearX", "shearY");
             if (n.path("length").asDouble() < 0) n.remove("length");
             pending.add(n);
         }
@@ -126,15 +141,25 @@ final class Spine38Json {
                     String type = n.path("type").asText("region");
                     switch (type) {
                         case "region" -> fields(n, p, warnings, "type", "path", "x", "y", "rotation", "scaleX", "scaleY", "width", "height");
-                        case "mesh" -> fields(n, p, warnings, "type", "path", "vertices", "uvs", "triangles", "hull");
-                        case "clipping" -> fields(n, p, warnings, "type", "end", "vertexCount", "vertices");
+                        case "mesh" -> fields(n, p, warnings, "type", "path", "vertices", "uvs", "triangles", "hull", "edges", "width", "height");
+                        case "clipping" -> fields(n, p, warnings, "type", "end", "vertexCount", "vertices", "color");
+                        case "boundingbox" -> fields(n, p, warnings, "type", "vertexCount", "vertices", "color");
                         case "path" -> fields(n, p, warnings, "type", "closed", "constantSpeed", "vertexCount", "vertices", "lengths");
                         default -> { warnings.add(p + ": unsupported attachment " + type + " filtered"); ai.remove(); continue; }
                     }
                     numbers(n, p, warnings, "x", "y", "rotation", "scaleX", "scaleY", "width", "height");
+                    if (n.has("color")) try { Rgba.parse(n.get("color").textValue()); }
+                    catch (IllegalArgumentException invalid) { warnings.add(p + ".color: invalid attachment color filtered"); n.remove("color"); }
                     if (type.equals("mesh")) remapWeights(n, input.path("bones"), boneArray, p, warnings);
-                    if (n.has("width") && n.path("width").asDouble() <= 0) n.remove("width");
-                    if (n.has("height") && n.path("height").asDouble() <= 0) n.remove("height");
+                    if (n.has("width") && (n.path("width").asDouble() < 0 || !type.equals("mesh") && n.path("width").asDouble() == 0)) n.remove("width");
+                    if (n.has("height") && (n.path("height").asDouble() < 0 || !type.equals("mesh") && n.path("height").asDouble() == 0)) n.remove("height");
+                    if (type.equals("mesh") && n.has("edges")) {
+                        var edges = n.get("edges");
+                        boolean valid = edges.isArray() && edges.size() % 2 == 0;
+                        for (var edge : edges) valid &= edge.isIntegralNumber() && edge.canConvertToInt()
+                                && edge.intValue() >= 0 && edge.intValue() % 2 == 0 && edge.intValue() < n.path("uvs").size();
+                        if (!valid) { warnings.add(p + ".edges: invalid mesh edges filtered"); n.remove("edges"); }
+                    }
                 }
             }
         }
@@ -168,7 +193,7 @@ final class Spine38Json {
                 else for (var bi = anim.get("bones").fields(); bi.hasNext();) {
                     var b = bi.next();
                     if (!bones.contains(b.getKey()) || !(b.getValue() instanceof ObjectNode bt)) { warnings.add(p + ".bones." + b.getKey() + ": unknown bone filtered"); bi.remove(); continue; }
-                    fields(bt, p + ".bones." + b.getKey(), warnings, "rotate", "translate", "scale");
+                    fields(bt, p + ".bones." + b.getKey(), warnings, "rotate", "translate", "scale", "shear");
                     for (var ti = bt.fields(); ti.hasNext();) {
                         var t = ti.next(); String q = p + ".bones." + b.getKey() + "." + t.getKey();
                         if (!t.getValue().isArray()) { warnings.add(q + ": invalid timeline filtered"); ti.remove(); continue; }
@@ -328,7 +353,7 @@ final class Spine38Json {
             if (curve.isArray() && curve.size() == 4) for (int j = 0; j < 4; j++) c[j] = curve.get(j).asDouble(Double.NaN);
             boolean valid = curve.isNumber() || curve.isArray() && curve.size() == 4;
             for (double v : c) valid &= Double.isFinite(v);
-            valid &= c[0] >= 0 && c[0] <= c[2] && c[2] <= 1;
+            valid &= c[0] >= 0 && c[0] <= 1 && c[2] >= 0 && c[2] <= 1;
             if (!valid) { warnings.add(p + ".curve: invalid curve; using linear"); continue; }
             var next = keys.get(i + 1); double time = k.path("time").asDouble(), dt = next.path("time").asDouble() - time;
             var out = k.putArray("curve");
@@ -361,13 +386,13 @@ final class Spine38Json {
         if (d.constraints().stream().anyMatch(c -> c instanceof PathConstraint p && p.spacingMode() == PathConstraint.SpacingMode.PROPORTIONAL))
             throw ProjectCodec.bad("$.path.spacingMode", "Spine 3.8 does not support proportional spacing");
         ((ObjectNode)root.get("skeleton")).put("spine", VERSION);
-        root.path("bones").forEach(b -> { ((ObjectNode)b).remove("inherit"); ((ObjectNode)b).put("transform", "normal"); });
+        root.path("bones").forEach(b -> rename((ObjectNode)b, "inherit", "transform"));
         for (var clip : d.animations()) {
             var anim = (ObjectNode)root.path("animations").get(clip.name()); var bones = anim.putObject("bones");
             SlotColorJson.export38(anim,d,clip.discrete().colors());
             for (var track : clip.timelines()) {
                 var row = bones.withObject("/" + escape(d.bone(track.boneId()).name()));
-                String type = track.channel() == Channel.ROTATE ? "rotate" : track.channel() == Channel.SCALE ? "scale" : "translate";
+                String type = track.channel().name().toLowerCase(Locale.ROOT);
                 var keys = row.putArray(type);
                 for (int i = 0; i < track.keys().size(); i++) {
                     var k = track.keys().get(i); var n = keys.addObject().put("time", k.time());

@@ -55,6 +55,18 @@ public record Affine2(double a, double b, double c, double d, double tx, double 
                 .orElseThrow(() -> new IllegalArgumentException("Singular or ill-conditioned affine transform"));
     }
 
+    /** Exact canonical rotation/scale/shear decomposition for bone world editing. */
+    public Transform toTransformOrThrow() {
+        double sx = Math.hypot(a,c), sy = Math.hypot(b,d);
+        Finite.require(sx,"world scale X"); Finite.require(sy,"world scale Y");
+        double rotation = sx == 0 ? Math.atan2(-b,d) : Math.atan2(c,a);
+        if (determinant() < 0) sy = -sy;
+        double yAngle = sy == 0 ? rotation : Math.atan2(-b / sy, d / sy);
+        double shear = Math.toDegrees(yAngle - rotation);
+        shear = (shear + 540) % 360 - 180;
+        return new Transform(tx,ty,Math.toDegrees(rotation),sx,sy,0,shear);
+    }
+
     /**
      * Used only by explicit keep-world reparent. Refuse shear; never approximate it
      * away.

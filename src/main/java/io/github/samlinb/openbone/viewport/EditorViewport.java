@@ -309,7 +309,7 @@ public final class EditorViewport extends ApplicationAdapter {
             var pose = host.evaluatedPose();
             var editVertices = pose.paths().containsKey(meshId) ? pose.paths().get(meshId)
                     : pose.meshes().containsKey(meshId) ? pose.meshes().get(meshId).vertices()
-                            : pose.clips().get(meshId).vertices();
+                            : pose.bounds().containsKey(meshId) ? pose.bounds().get(meshId).vertices() : pose.clips().get(meshId).vertices();
             int pick = -1;
             double best = 10;
             for (int i = 0; i < editVertices.size(); i++) {
@@ -610,6 +610,8 @@ public final class EditorViewport extends ApplicationAdapter {
                     || d.slots().stream().anyMatch(s -> Objects.equals(selected, s.id()) && s.boneId().equals(b.id()));
             if (active)
                 shapes.setColor(1, .8f, .25f, 1);
+            else if (!b.color().equals(Rgba.WHITE))
+                shapes.setColor(f(b.color().r()), f(b.color().g()), f(b.color().b()), f(b.color().a()));
             else
                 shapes.setColor(.65f, .78f, .88f, 1);
             var bw = pose.bones().get(b.id());
@@ -654,15 +656,26 @@ public final class EditorViewport extends ApplicationAdapter {
             }
             var clip = pose.clips().get(rid);
             if (clip != null) {
-                shapes.setColor(.4f, .7f, 1, 1);
+                var clipColor = ((ClippingAttachment)d.attachment(rid)).color();
+                shapes.setColor(f(clipColor.r()), f(clipColor.g()), f(clipColor.b()), f(clipColor.a()));
                 for (int k = 0; k < clip.vertices().size(); k++) {
                     var p = screen(clip.vertices().get(k));
                     line(p, screen(clip.vertices().get((k + 1) % clip.vertices().size())));
                     if (meshEditing) {
                         shapes.setColor(k == meshIndex ? Color.CYAN : Color.YELLOW);
                         shapes.circle(f(p.x()), f(p.y()), k == meshIndex ? 6 : 4, 16);
-                        shapes.setColor(.4f, .7f, 1, 1);
+                        shapes.setColor(f(clipColor.r()), f(clipColor.g()), f(clipColor.b()), f(clipColor.a()));
                     }
+                }
+            }
+            var bound = pose.bounds().get(rid);
+            if (bound != null) {
+                var color = ((BoundingBoxAttachment)d.attachment(rid)).color();
+                for (int k = 0; k < bound.vertices().size(); k++) {
+                    shapes.setColor(f(color.r()), f(color.g()), f(color.b()), f(color.a()));
+                    var point = screen(bound.vertices().get(k));
+                    line(point, screen(bound.vertices().get((k+1)%bound.vertices().size())));
+                    if (meshEditing) { shapes.setColor(k == meshIndex ? Color.CYAN : Color.YELLOW); shapes.circle(f(point.x()),f(point.y()),4,12); }
                 }
             }
             var pathVertices = pose.paths().get(rid);

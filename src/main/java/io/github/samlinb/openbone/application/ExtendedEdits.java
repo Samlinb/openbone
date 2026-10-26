@@ -67,7 +67,7 @@ public final class ExtendedEdits {
         var skins = new ArrayList<>(d.skins());
         skins.add(new Skin(name, Map.of()));
         return d.withResources(
-                new Resources(skins, d.resources().activeSkin(), d.resources().events(), d.resources().atlas()));
+                new Resources(skins, d.resources().activeSkin(), d.resources().events(), d.resources().atlas(), d.resources().metadata()));
     }
 
     public static DocumentSnapshot bind(DocumentSnapshot d, String skin, Attachment a, AtlasRegion region) {
@@ -95,7 +95,7 @@ public final class ExtendedEdits {
         if (region != null)
             atlas.put(a.id(), region);
         return new DocumentSnapshot(d.bones(), d.slots(), all, d.animations(), d.constraints(),
-                new Resources(skins, d.resources().activeSkin(), d.resources().events(), atlas));
+                new Resources(skins, d.resources().activeSkin(), d.resources().events(), atlas, d.resources().metadata()));
     }
 
     public static DocumentSnapshot attachment(DocumentSnapshot d, EntityId clip, EntityId slot, double time,
@@ -126,7 +126,7 @@ public final class ExtendedEdits {
         events.removeIf(old -> old.id().equals(e.id()));
         events.add(e);
         return d.withResources(
-                new Resources(d.resources().skins(), d.resources().activeSkin(), events, d.resources().atlas()));
+                new Resources(d.resources().skins(), d.resources().activeSkin(), events, d.resources().atlas(), d.resources().metadata()));
     }
 
     public static DocumentSnapshot event(DocumentSnapshot d, EntityId clip, DiscreteTracks.EventKey e) {
