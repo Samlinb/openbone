@@ -103,7 +103,7 @@ class RecoveryIsolationTest {
     }
     @Test void missingRootIsEmptyWithoutCreatingIt() throws Exception {Path absent=root.resolve("missing");assertTrue(RecoveryStore.candidates(absent).isEmpty());assertFalse(Files.exists(absent));}
     @Test void activeJvmAndCompetingClaimantStayExcluded() throws Exception {
-        saved(1);String java=Path.of(System.getProperty("java.home"),"bin","java.exe").toString();
+        saved(1);String java=Path.of(System.getProperty("java.home"),"bin",System.getProperty("os.name","").toLowerCase(Locale.ROOT).contains("win")?"java.exe":"java").toString();
         var peer=new ProcessBuilder(java,"-cp",System.getProperty("java.class.path"),LockPeer.class.getName(),root.toString()).redirectErrorStream(true).start();
         try{
             var line=CompletableFuture.supplyAsync(()->{try{return new BufferedReader(new InputStreamReader(peer.getInputStream())).readLine();}catch(IOException e){throw new UncheckedIOException(e);}}).get(5,TimeUnit.SECONDS);assertEquals("READY",line);

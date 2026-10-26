@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class Ik2StaticBranchesTest {
  static DocumentSnapshot original()throws Exception{try(var in=Ik2StaticBranchesTest.class.getResourceAsStream("/regressions/p7-ind-03.json")){assertNotNull(in);return new ProjectCodec().decode(in.readAllBytes());}}
- static DocumentSnapshot safe()throws Exception{var d=Ik2AnimatedPrecisionTest.safe();return d.withAnimations(List.of(AnimationClip.DEFAULT));}
+ static DocumentSnapshot safe()throws Exception{var d=FloatPrecisionCertificateTest.safeZero();return d.withAnimations(List.of(AnimationClip.DEFAULT));}
  static String branch(DocumentSnapshot d){var ik=(IkConstraint)d.constraints().get(0);return Ik2PrecisionCertificate.staticSolution(d,ik,Ik2PrecisionCertificate.input(d,ik)).branch();}
  static void refuses(DocumentSnapshot d)throws Exception{assertEquals(d,new ProjectCodec().decode(new ProjectCodec().encode(d)));var pose=d.evaluateWorld();var e=assertThrows(ProjectFormatException.class,()->RuntimeRange.validate(d));assertTrue(e.getMessage().contains("float-precision"),e.getMessage());assertEquals(pose,d.evaluateWorld());}
  @Test void originalThirdIndependentStaticEllipseIsAuditedAndLossless()throws Exception{var d=original();assertTrue(branch(d).startsWith("ELLIPSE"));refuses(d);}
