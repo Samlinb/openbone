@@ -1,0 +1,186 @@
+{
+  "skeleton" : {
+    "spine" : "4.2.22",
+    "images" : "images/"
+  },
+  "bones" : [ {
+    "name" : "root",
+    "x" : 0.0,
+    "y" : 0.0,
+    "rotation" : 0.0,
+    "scaleX" : 0.9,
+    "scaleY" : 1.2,
+    "length" : 30.0,
+    "inherit" : "normal"
+  }, {
+    "name" : "child",
+    "parent" : "root",
+    "x" : 45.0,
+    "y" : 5.0,
+    "rotation" : 5.0,
+    "scaleX" : -1.1,
+    "scaleY" : 1.2,
+    "length" : 30.0,
+    "inherit" : "normal"
+  }, {
+    "name" : "tip",
+    "parent" : "child",
+    "x" : 45.0,
+    "y" : 5.0,
+    "rotation" : 10.0,
+    "scaleX" : 0.9,
+    "scaleY" : 0.7,
+    "length" : 30.0,
+    "inherit" : "normal"
+  } ],
+  "slots" : [ {
+    "name" : "image-slot",
+    "bone" : "tip",
+    "blend" : "normal",
+    "attachment" : "image"
+  } ],
+  "skins" : [ {
+    "name" : "default",
+    "attachments" : {
+      "image-slot" : {
+        "image" : {
+          "type" : "region",
+          "path" : "region_0",
+          "x" : 4.0,
+          "y" : -3.0,
+          "rotation" : 12.0,
+          "scaleX" : -1.0,
+          "scaleY" : 0.8,
+          "width" : 64.0,
+          "height" : 48.0
+        }
+      }
+    }
+  } ],
+  "animations" : {
+    "three-rotation-cases" : {
+      "bones" : {
+        "root" : {
+          "rotate" : [ {
+            "time" : 0.2,
+            "value" : 170.0
+          }, {
+            "time" : 1.0,
+            "value" : 190.0
+          } ],
+          "translatex" : [ {
+            "time" : 0.2,
+            "value" : 5.0,
+            "curve" : [ 0.36000000000000004, 5.0, 0.8400000000000001, 15.0 ]
+          }, {
+            "time" : 1.0,
+            "value" : 15.0
+          } ],
+          "translatey" : [ {
+            "time" : 0.2,
+            "value" : -3.0,
+            "curve" : "stepped"
+          }, {
+            "time" : 1.0,
+            "value" : 8.0
+          } ],
+          "scalex" : [ {
+            "time" : 0.2,
+            "value" : -1.0
+          }, {
+            "time" : 1.0,
+            "value" : 1.0
+          } ],
+          "scaley" : [ {
+            "time" : 0.2,
+            "value" : 1.0,
+            "curve" : [ 0.44, 0.0, 0.76, 1.0 ]
+          }, {
+            "time" : 1.0,
+            "value" : 0.0
+          } ]
+        },
+        "child" : {
+          "rotate" : [ {
+            "time" : 0.2,
+            "value" : 170.0
+          }, {
+            "time" : 1.0,
+            "value" : -170.0
+          } ],
+          "translatex" : [ {
+            "time" : 0.2,
+            "value" : 5.0,
+            "curve" : [ 0.36000000000000004, 5.0, 0.8400000000000001, 15.0 ]
+          }, {
+            "time" : 1.0,
+            "value" : 15.0
+          } ],
+          "translatey" : [ {
+            "time" : 0.2,
+            "value" : -3.0,
+            "curve" : "stepped"
+          }, {
+            "time" : 1.0,
+            "value" : 8.0
+          } ],
+          "scalex" : [ {
+            "time" : 0.2,
+            "value" : -1.0
+          }, {
+            "time" : 1.0,
+            "value" : 1.0
+          } ],
+          "scaley" : [ {
+            "time" : 0.2,
+            "value" : 1.0,
+            "curve" : [ 0.44, 0.0, 0.76, 1.0 ]
+          }, {
+            "time" : 1.0,
+            "value" : 0.0
+          } ]
+        },
+        "tip" : {
+          "rotate" : [ {
+            "time" : 0.2,
+            "value" : 0.0
+          }, {
+            "time" : 1.0,
+            "value" : 720.0
+          } ],
+          "translatex" : [ {
+            "time" : 0.2,
+            "value" : 5.0,
+            "curve" : [ 0.36000000000000004, 5.0, 0.8400000000000001, 15.0 ]
+          }, {
+            "time" : 1.0,
+            "value" : 15.0
+          } ],
+          "translatey" : [ {
+            "time" : 0.2,
+            "value" : -3.0,
+            "curve" : "stepped"
+          }, {
+            "time" : 1.0,
+            "value" : 8.0
+          } ],
+          "scalex" : [ {
+            "time" : 0.2,
+            "value" : -1.0
+          }, {
+            "time" : 1.0,
+            "value" : 1.0
+          } ],
+          "scaley" : [ {
+            "time" : 0.2,
+            "value" : 1.0,
+            "curve" : [ 0.44, 0.0, 0.76, 1.0 ]
+          }, {
+            "time" : 1.0,
+            "value" : 0.0
+          } ]
+        }
+      }
+    }
+  }
+}

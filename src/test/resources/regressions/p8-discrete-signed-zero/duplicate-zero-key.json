@@ -1,0 +1,438 @@
+{
+  "schemaVersion" : 6,
+  "resources" : {
+    "activeSkin" : "red",
+    "skins" : [ {
+      "name" : "default",
+      "attachments" : [ {
+        "slotId" : "00000000-0000-4000-8000-000000000011",
+        "name" : "fallback",
+        "attachmentId" : "00000000-0000-4000-8000-000000000021"
+      }, {
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : "alternate",
+        "attachmentId" : "00000000-0000-4000-8000-000000000024"
+      }, {
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : "body",
+        "attachmentId" : "00000000-0000-4000-8000-000000000020"
+      }, {
+        "slotId" : "00000000-0000-4000-8000-000000000012",
+        "name" : "glow",
+        "attachmentId" : "00000000-0000-4000-8000-000000000022"
+      } ]
+    }, {
+      "name" : "red",
+      "attachments" : [ {
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : "body",
+        "attachmentId" : "00000000-0000-4000-8000-000000000023"
+      } ]
+    }, {
+      "name" : "empty",
+      "attachments" : [ ]
+    } ],
+    "events" : [ {
+      "id" : "00000000-0000-4000-8000-000000000040",
+      "name" : "hit",
+      "int" : 7,
+      "float" : 0.25,
+      "string" : "默认事件",
+      "audio" : "",
+      "volume" : 1.0,
+      "balance" : 0.0
+    }, {
+      "id" : "00000000-0000-4000-8000-000000000041",
+      "name" : "sound",
+      "int" : 2,
+      "float" : 0.75,
+      "string" : "音频元数据",
+      "audio" : "audio/hit.wav",
+      "volume" : 0.8,
+      "balance" : -0.25
+    } ],
+    "atlas" : [ {
+      "attachmentId" : "00000000-0000-4000-8000-000000000020",
+      "pageWidth" : 256,
+      "pageHeight" : 128,
+      "x" : 12,
+      "y" : 8,
+      "width" : 72,
+      "height" : 48,
+      "originalWidth" : 100,
+      "originalHeight" : 80,
+      "offsetX" : 13,
+      "offsetY" : 17,
+      "rotated" : true
+    }, {
+      "attachmentId" : "00000000-0000-4000-8000-000000000022",
+      "pageWidth" : 256,
+      "pageHeight" : 128,
+      "x" : 110,
+      "y" : 20,
+      "width" : 80,
+      "height" : 60,
+      "originalWidth" : 100,
+      "originalHeight" : 80,
+      "offsetX" : 8,
+      "offsetY" : 12,
+      "rotated" : false
+    }, {
+      "attachmentId" : "00000000-0000-4000-8000-000000000023",
+      "pageWidth" : 128,
+      "pageHeight" : 128,
+      "x" : 9,
+      "y" : 13,
+      "width" : 64,
+      "height" : 50,
+      "originalWidth" : 100,
+      "originalHeight" : 80,
+      "offsetX" : 17,
+      "offsetY" : 14,
+      "rotated" : true
+    } ]
+  },
+  "bones" : [ {
+    "id" : "00000000-0000-4000-8000-000000000001",
+    "name" : "root",
+    "parentId" : null,
+    "local" : {
+      "x" : 0.0,
+      "y" : 0.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "length" : 40.0
+  } ],
+  "slots" : [ {
+    "id" : "00000000-0000-4000-8000-000000000010",
+    "name" : "back",
+    "boneId" : "00000000-0000-4000-8000-000000000001",
+    "activeAttachmentId" : "00000000-0000-4000-8000-000000000020",
+    "blend" : "NORMAL"
+  }, {
+    "id" : "00000000-0000-4000-8000-000000000011",
+    "name" : "middle",
+    "boneId" : "00000000-0000-4000-8000-000000000001",
+    "activeAttachmentId" : "00000000-0000-4000-8000-000000000021",
+    "blend" : "NORMAL"
+  }, {
+    "id" : "00000000-0000-4000-8000-000000000012",
+    "name" : "front",
+    "boneId" : "00000000-0000-4000-8000-000000000001",
+    "activeAttachmentId" : "00000000-0000-4000-8000-000000000022",
+    "blend" : "NORMAL"
+  } ],
+  "attachments" : [ {
+    "type" : "region",
+    "id" : "00000000-0000-4000-8000-000000000020",
+    "name" : "body",
+    "slotId" : "00000000-0000-4000-8000-000000000010",
+    "source" : "D:\\rea_work\\openbone\\verification\\P8\\independent-20261025-02\\独立保存.json.assets\\dbc9719f99a5d80b8ab27af47a1d00e7e429f71ac9b2f6a8b2550d7d2ad88b67.png",
+    "local" : {
+      "x" : -25.0,
+      "y" : 5.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "width" : 160.0,
+    "height" : 100.0
+  }, {
+    "type" : "region",
+    "id" : "00000000-0000-4000-8000-000000000021",
+    "name" : "fallback",
+    "slotId" : "00000000-0000-4000-8000-000000000011",
+    "source" : "D:\\rea_work\\openbone\\verification\\P8\\independent-20261025-02\\独立保存.json.assets\\26a711b63cfd20c14cfefaef5e9a723e0cede0efe6b9a24969b0a69fb5121ff7.png",
+    "local" : {
+      "x" : 30.0,
+      "y" : -20.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "width" : 120.0,
+    "height" : 90.0
+  }, {
+    "type" : "region",
+    "id" : "00000000-0000-4000-8000-000000000022",
+    "name" : "glow",
+    "slotId" : "00000000-0000-4000-8000-000000000012",
+    "source" : "D:\\rea_work\\openbone\\verification\\P8\\independent-20261025-02\\独立保存.json.assets\\dbc9719f99a5d80b8ab27af47a1d00e7e429f71ac9b2f6a8b2550d7d2ad88b67.png",
+    "local" : {
+      "x" : 10.0,
+      "y" : 20.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "width" : 130.0,
+    "height" : 100.0
+  }, {
+    "type" : "region",
+    "id" : "00000000-0000-4000-8000-000000000023",
+    "name" : "body",
+    "slotId" : "00000000-0000-4000-8000-000000000010",
+    "source" : "D:\\rea_work\\openbone\\verification\\P8\\independent-20261025-02\\独立保存.json.assets\\26a711b63cfd20c14cfefaef5e9a723e0cede0efe6b9a24969b0a69fb5121ff7.png",
+    "local" : {
+      "x" : -15.0,
+      "y" : 12.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "width" : 160.0,
+    "height" : 100.0
+  }, {
+    "type" : "region",
+    "id" : "00000000-0000-4000-8000-000000000024",
+    "name" : "alternate",
+    "slotId" : "00000000-0000-4000-8000-000000000010",
+    "source" : "D:\\rea_work\\openbone\\verification\\P8\\independent-20261025-02\\独立保存.json.assets\\dbc9719f99a5d80b8ab27af47a1d00e7e429f71ac9b2f6a8b2550d7d2ad88b67.png",
+    "local" : {
+      "x" : 40.0,
+      "y" : 0.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "width" : 110.0,
+    "height" : 80.0
+  } ],
+  "animations" : [ {
+    "id" : "00000000-0000-4000-8000-000000000030",
+    "name" : "walk",
+    "discrete" : {
+      "attachments" : [ {
+        "id" : "54eb1bfc-fbed-45b4-911d-980b166e7ac6",
+        "time" : -0.0,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : null
+      }, {
+        "id" : "8d8604da-405d-49c6-8253-53b8dea1b997",
+        "time" : 0.0,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : "body"
+      }, {
+        "id" : "b316fbd1-a09b-4c48-ae0d-72b9f6f39ef3",
+        "time" : 0.5,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : null
+      }, {
+        "id" : "b9fda2c0-3337-4721-a2d8-9bb28c6d253d",
+        "time" : 1.0,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : "alternate"
+      } ],
+      "drawOrder" : [ {
+        "id" : "f92050d0-008a-4328-b92a-1422f71520cd",
+        "time" : 0.5,
+        "slots" : [ "00000000-0000-4000-8000-000000000012", "00000000-0000-4000-8000-000000000010", "00000000-0000-4000-8000-000000000011" ]
+      }, {
+        "id" : "b7089d8d-f8d9-4711-b20a-baab7d100df9",
+        "time" : 1.0,
+        "slots" : [ "00000000-0000-4000-8000-000000000010", "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012" ]
+      } ],
+      "events" : [ {
+        "id" : "d8770adf-6186-44f2-bfd9-839b720cf5a5",
+        "time" : 0.0,
+        "eventId" : "00000000-0000-4000-8000-000000000040",
+        "int" : 0,
+        "float" : 0.0,
+        "string" : "event@0.0",
+        "volume" : 1.0,
+        "balance" : 0.0
+      }, {
+        "id" : "98def7eb-d8c3-44c7-8c4f-6ccb4cad21d9",
+        "time" : 0.5,
+        "eventId" : "00000000-0000-4000-8000-000000000040",
+        "int" : 5,
+        "float" : 0.5,
+        "string" : "event@0.5",
+        "volume" : 1.0,
+        "balance" : 0.0
+      }, {
+        "id" : "5650ff07-32f7-4361-9ae6-b1f36e37b91b",
+        "time" : 0.5,
+        "eventId" : "00000000-0000-4000-8000-000000000041",
+        "int" : 55,
+        "float" : 0.125,
+        "string" : "同刻第二事件",
+        "volume" : 0.6,
+        "balance" : 0.5
+      }, {
+        "id" : "ff3c87c7-0c19-4b8f-b492-81d45bdcd0ce",
+        "time" : 1.0,
+        "eventId" : "00000000-0000-4000-8000-000000000040",
+        "int" : 10,
+        "float" : 1.0,
+        "string" : "event@1.0",
+        "volume" : 1.0,
+        "balance" : 0.0
+      } ]
+    },
+    "timelines" : [ ],
+    "constraintTracks" : [ ],
+    "deforms" : [ ]
+  }, {
+    "id" : "00000000-0000-4000-8000-000000000031",
+    "name" : "跑步",
+    "discrete" : {
+      "attachments" : [ {
+        "id" : "acf5cdb8-baf8-4036-8e9c-c3285363300b",
+        "time" : 0.0,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : "body"
+      }, {
+        "id" : "39f08ea5-be17-4b9f-8888-284503acb417",
+        "time" : 0.5,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : null
+      }, {
+        "id" : "8ae7257c-0575-483f-9437-95ea66fa0434",
+        "time" : 1.0,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : "alternate"
+      } ],
+      "drawOrder" : [ {
+        "id" : "f5d45261-de3d-4825-8554-b998545630b0",
+        "time" : 0.5,
+        "slots" : [ "00000000-0000-4000-8000-000000000012", "00000000-0000-4000-8000-000000000010", "00000000-0000-4000-8000-000000000011" ]
+      }, {
+        "id" : "ee18fbd6-c08b-4608-bae0-43cb2f9140f7",
+        "time" : 1.0,
+        "slots" : [ "00000000-0000-4000-8000-000000000010", "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012" ]
+      } ],
+      "events" : [ {
+        "id" : "dc057b0a-0cc8-4f7e-8424-923e617ed383",
+        "time" : 0.0,
+        "eventId" : "00000000-0000-4000-8000-000000000040",
+        "int" : 0,
+        "float" : 0.0,
+        "string" : "event@0.0",
+        "volume" : 1.0,
+        "balance" : 0.0
+      }, {
+        "id" : "68d9faf2-fbf5-41e6-b3be-0b2c408feb4f",
+        "time" : 0.5,
+        "eventId" : "00000000-0000-4000-8000-000000000040",
+        "int" : 5,
+        "float" : 0.5,
+        "string" : "event@0.5",
+        "volume" : 1.0,
+        "balance" : 0.0
+      }, {
+        "id" : "dc2da767-86ca-4c35-8969-41b9aad9c50f",
+        "time" : 0.5,
+        "eventId" : "00000000-0000-4000-8000-000000000041",
+        "int" : 55,
+        "float" : 0.125,
+        "string" : "同刻第二事件",
+        "volume" : 0.6,
+        "balance" : 0.5
+      }, {
+        "id" : "16ea3058-3757-4c30-a030-cd8050d69954",
+        "time" : 1.0,
+        "eventId" : "00000000-0000-4000-8000-000000000040",
+        "int" : 10,
+        "float" : 1.0,
+        "string" : "event@1.0",
+        "volume" : 1.0,
+        "balance" : 0.0
+      } ]
+    },
+    "timelines" : [ ],
+    "constraintTracks" : [ ],
+    "deforms" : [ ]
+  }, {
+    "id" : "8151197b-f2a0-40e9-9e2c-4bd82551c81e",
+    "name" : "独立复制动画",
+    "discrete" : {
+      "attachments" : [ {
+        "id" : "f121a1ab-02b2-43d5-9fe7-27857d4bd240",
+        "time" : 0.0,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : "body"
+      }, {
+        "id" : "a318f418-181f-4212-8da0-8e7c92fc92e5",
+        "time" : 0.5,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : null
+      }, {
+        "id" : "eec7bb14-9d2a-4aaa-91a3-c89bba2cafdd",
+        "time" : 0.75,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : null
+      }, {
+        "id" : "218dd96a-9f1e-46e6-9220-eba321b8104b",
+        "time" : 1.0,
+        "slotId" : "00000000-0000-4000-8000-000000000010",
+        "name" : "alternate"
+      } ],
+      "drawOrder" : [ {
+        "id" : "efe39b44-a137-4a34-85cb-36258fccb0cc",
+        "time" : 0.5,
+        "slots" : [ "00000000-0000-4000-8000-000000000012", "00000000-0000-4000-8000-000000000010", "00000000-0000-4000-8000-000000000011" ]
+      }, {
+        "id" : "70a43653-7df8-4d6e-981d-0dc0b7235970",
+        "time" : 0.75,
+        "slots" : [ "00000000-0000-4000-8000-000000000010", "00000000-0000-4000-8000-000000000012", "00000000-0000-4000-8000-000000000011" ]
+      }, {
+        "id" : "dae6475d-ee91-44a0-97be-1bcf7676c0de",
+        "time" : 1.0,
+        "slots" : [ "00000000-0000-4000-8000-000000000010", "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012" ]
+      } ],
+      "events" : [ {
+        "id" : "30c00f9e-beab-4058-97bb-d8a06d914b41",
+        "time" : 0.0,
+        "eventId" : "00000000-0000-4000-8000-000000000040",
+        "int" : 0,
+        "float" : 0.0,
+        "string" : "event@0.0",
+        "volume" : 1.0,
+        "balance" : 0.0
+      }, {
+        "id" : "0389742b-5078-4e19-8fd3-d2c0e85c5aab",
+        "time" : 0.5,
+        "eventId" : "00000000-0000-4000-8000-000000000040",
+        "int" : 5,
+        "float" : 0.5,
+        "string" : "event@0.5",
+        "volume" : 1.0,
+        "balance" : 0.0
+      }, {
+        "id" : "8a3fc1b3-5587-4e97-b8f5-482fbf7d2a51",
+        "time" : 0.5,
+        "eventId" : "00000000-0000-4000-8000-000000000041",
+        "int" : 55,
+        "float" : 0.125,
+        "string" : "同刻第二事件",
+        "volume" : 0.6,
+        "balance" : 0.5
+      }, {
+        "id" : "bebbfd1e-c6a3-479e-b1b0-f8c3fbbb8096",
+        "time" : 0.75,
+        "eventId" : "00000000-0000-4000-8000-000000000040",
+        "int" : 0,
+        "float" : 0.0,
+        "string" : "independent@0.75",
+        "volume" : 1.0,
+        "balance" : 0.0
+      }, {
+        "id" : "03fa01e4-ff0c-4bc6-b503-4864d1c9b9cf",
+        "time" : 1.0,
+        "eventId" : "00000000-0000-4000-8000-000000000040",
+        "int" : 10,
+        "float" : 1.0,
+        "string" : "event@1.0",
+        "volume" : 1.0,
+        "balance" : 0.0
+      } ]
+    },
+    "timelines" : [ ],
+    "constraintTracks" : [ ],
+    "deforms" : [ ]
+  } ],
+  "constraints" : [ ]
+}

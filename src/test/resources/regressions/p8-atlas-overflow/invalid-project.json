@@ -1,0 +1,71 @@
+{
+  "schemaVersion" : 6,
+  "resources" : {
+    "activeSkin" : "default",
+    "skins" : [ ],
+    "events" : [ ],
+    "atlas" : [ {
+      "attachmentId" : "00000000-0000-4000-8000-000000000003",
+      "pageWidth" : 4,
+      "pageHeight" : 4,
+      "x" : 0,
+      "y" : 0,
+      "width" : 2,
+      "height" : 2,
+      "originalWidth" : 4,
+      "originalHeight" : 4,
+      "offsetX" : 2147483647,
+      "offsetY" : 2147483647,
+      "rotated" : false
+    } ]
+  },
+  "bones" : [ {
+    "id" : "00000000-0000-4000-8000-000000000001",
+    "name" : "root",
+    "parentId" : null,
+    "local" : {
+      "x" : 0.0,
+      "y" : 0.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "length" : 2.0
+  } ],
+  "slots" : [ {
+    "id" : "00000000-0000-4000-8000-000000000002",
+    "name" : "slot",
+    "boneId" : "00000000-0000-4000-8000-000000000001",
+    "activeAttachmentId" : "00000000-0000-4000-8000-000000000003",
+    "blend" : "NORMAL"
+  } ],
+  "attachments" : [ {
+    "type" : "region",
+    "id" : "00000000-0000-4000-8000-000000000003",
+    "name" : "a",
+    "slotId" : "00000000-0000-4000-8000-000000000002",
+    "source" : "page.png",
+    "local" : {
+      "x" : 0.0,
+      "y" : 0.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "width" : 4.0,
+    "height" : 4.0
+  } ],
+  "animations" : [ {
+    "id" : "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    "name" : "默认动画",
+    "discrete" : {
+      "attachments" : [ ],
+      "drawOrder" : [ ],
+      "events" : [ ]
+    },
+    "timelines" : [ ],
+    "constraintTracks" : [ ],
+    "deforms" : [ ]
+  } ],
+  "constraints" : [ ]
+}

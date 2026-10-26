@@ -1,0 +1,68 @@
+{
+  "schemaVersion" : 6,
+  "resources" : {
+    "activeSkin" : "default",
+    "skins" : [ ],
+    "events" : [ ],
+    "atlas" : [ ]
+  },
+  "bones" : [ {
+    "id" : "00000000-0000-4000-8000-000000000001",
+    "name" : "root",
+    "parentId" : null,
+    "local" : {
+      "x" : 0.0,
+      "y" : 0.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "length" : 1.0
+  } ],
+  "slots" : [ {
+    "id" : "00000000-0000-4000-8000-000000000002",
+    "name" : "slot",
+    "boneId" : "00000000-0000-4000-8000-000000000001",
+    "activeAttachmentId" : "00000000-0000-4000-8000-000000000003",
+    "blend" : "NORMAL"
+  } ],
+  "attachments" : [ {
+    "type" : "region",
+    "id" : "00000000-0000-4000-8000-000000000003",
+    "name" : "a",
+    "slotId" : "00000000-0000-4000-8000-000000000002",
+    "source" : "D:\\rea_work\\openbone\\verification\\P8\\independent-20261025-02\\bad-ui\\page.png",
+    "local" : {
+      "x" : 0.0,
+      "y" : 0.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "width" : 4.0,
+    "height" : 4.0
+  } ],
+  "animations" : [ {
+    "id" : "00000000-0000-4000-8000-000000000004",
+    "name" : "zero",
+    "discrete" : {
+      "attachments" : [ {
+        "id" : "00000000-0000-4000-8000-000000000006",
+        "time" : -0.0,
+        "slotId" : "00000000-0000-4000-8000-000000000002",
+        "name" : null
+      }, {
+        "id" : "00000000-0000-4000-8000-000000000005",
+        "time" : 0.0,
+        "slotId" : "00000000-0000-4000-8000-000000000002",
+        "name" : "a"
+      } ],
+      "drawOrder" : [ ],
+      "events" : [ ]
+    },
+    "timelines" : [ ],
+    "constraintTracks" : [ ],
+    "deforms" : [ ]
+  } ],
+  "constraints" : [ ]
+}

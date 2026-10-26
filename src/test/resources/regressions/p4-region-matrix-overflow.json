@@ -1,0 +1,64 @@
+{
+  "schemaVersion" : 2,
+  "bones" : [ {
+    "id" : "00000000-0000-0000-0000-000000000001",
+    "name" : "zero",
+    "parentId" : null,
+    "local" : {
+      "x" : 0.0,
+      "y" : 0.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0,
+      "scaleY" : 1.0
+    },
+    "length" : 0.0
+  } ],
+  "slots" : [ {
+    "id" : "00000000-0000-0000-0000-000000000002",
+    "name" : "slot",
+    "boneId" : "00000000-0000-0000-0000-000000000001",
+    "activeAttachmentId" : "00000000-0000-0000-0000-000000000003"
+  } ],
+  "attachments" : [ {
+    "type" : "region",
+    "id" : "00000000-0000-0000-0000-000000000003",
+    "name" : "tiny",
+    "slotId" : "00000000-0000-0000-0000-000000000002",
+    "source" : "tiny.png",
+    "local" : {
+      "x" : 0.0,
+      "y" : 0.0,
+      "rotation" : 0.0,
+      "scaleX" : 1.0E200,
+      "scaleY" : 1.0E200
+    },
+    "width" : 1.0E-200,
+    "height" : 1.0E-200
+  } ],
+  "animations" : [ {
+    "id" : "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    "name" : "默认动画",
+    "timelines" : [ {
+      "boneId" : "00000000-0000-0000-0000-000000000001",
+      "channel" : "SCALE",
+      "keys" : [ {
+        "id" : "9f490e08-9dac-4434-ad12-abd72a6d6a34",
+        "time" : 1.0,
+        "values" : [ 1.0E200, 1.0E200 ],
+        "curves" : [ {
+          "kind" : "LINEAR",
+          "x1" : 0.0,
+          "y1" : 0.0,
+          "x2" : 1.0,
+          "y2" : 1.0
+        }, {
+          "kind" : "LINEAR",
+          "x1" : 0.0,
+          "y1" : 0.0,
+          "x2" : 1.0,
+          "y2" : 1.0
+        } ]
+      } ]
+    } ]
+  } ]
+}

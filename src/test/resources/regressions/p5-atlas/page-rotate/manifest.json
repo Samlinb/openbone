@@ -1,0 +1,9 @@
+{
+  "files" : {
+    "images/region_0.png" : "b492e133ba9f469a0df073a0f145328c7c202abe669b8ac6f231f3adefdb979c",
+    "skeleton.json" : "ce99e7f8aa606c4a4b294f691c67b0cd16570da0480bf96b0380681950a0d28a",
+    "skeleton.atlas" : "848d899618d6da325f0ee8b4b303e50963e91ed55cbaf1acd82696ff84dbdf55"
+  },
+  "spine" : "4.2.22",
+  "format" : "openbone-export-generation-1"
+}

@@ -1,0 +1,83 @@
+
+dandao_1.png
+size: 329,329
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+tx/1
+  rotate: false
+  xy: 58, 22
+  size: 16, 17
+  orig: 19, 19
+  offset: 1, 1
+  index: -1
+tx/gy1
+  rotate: false
+  xy: 2, 13
+  size: 26, 26
+  orig: 26, 26
+  offset: 0, 0
+  index: -1
+tx/gy2
+  rotate: false
+  xy: 30, 13
+  size: 26, 26
+  orig: 26, 26
+  offset: 0, 0
+  index: -1
+tx/sj1_019
+  rotate: false
+  xy: 258, 4
+  size: 62, 88
+  orig: 69, 100
+  offset: 3, 6
+  index: -1
+tx/sj1_020
+  rotate: false
+  xy: 97, 160
+  size: 87, 167
+  orig: 95, 180
+  offset: 4, 6
+  index: -1
+tx/sj1_021
+  rotate: false
+  xy: 2, 139
+  size: 93, 188
+  orig: 101, 200
+  offset: 4, 6
+  index: -1
+tx/sj1_022
+  rotate: true
+  xy: 2, 41
+  size: 96, 167
+  orig: 105, 180
+  offset: 3, 7
+  index: -1
+tx/sj1_023
+  rotate: false
+  xy: 171, 2
+  size: 85, 156
+  orig: 99, 169
+  offset: 6, 7
+  index: -1
+tx/sj1_024
+  rotate: true
+  xy: 186, 264
+  size: 63, 127
+  orig: 83, 144
+  offset: 11, 9
+  index: -1
+tx/xian1
+  rotate: false
+  xy: 186, 199
+  size: 103, 63
+  orig: 111, 67
+  offset: 4, 2
+  index: -1
+tx/xian2
+  rotate: true
+  xy: 258, 94
+  size: 103, 63
+  orig: 111, 67
+  offset: 4, 2
+  index: -1

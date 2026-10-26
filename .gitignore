@@ -2,5 +2,4 @@
 *.iml
 docs/
 __pycache__/
-src/test/
 res/

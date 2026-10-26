@@ -1,0 +1,62 @@
+[
+  {
+    "path": "control/skeleton.json",
+    "sha256": "ce99e7f8aa606c4a4b294f691c67b0cd16570da0480bf96b0380681950a0d28a",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\control\\skeleton.json"
+  },
+  {
+    "path": "control/skeleton.atlas",
+    "sha256": "89303848375d0e1690d3634de069fbcfe953cf24d284957094aa7abb085d4bb2",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\control\\skeleton.atlas"
+  },
+  {
+    "path": "control/images/region_0.png",
+    "sha256": "b492e133ba9f469a0df073a0f145328c7c202abe669b8ac6f231f3adefdb979c",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\control\\images\\region_0.png"
+  },
+  {
+    "path": "page-rotate/skeleton.json",
+    "sha256": "ce99e7f8aa606c4a4b294f691c67b0cd16570da0480bf96b0380681950a0d28a",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\page-rotate\\skeleton.json"
+  },
+  {
+    "path": "page-rotate/skeleton.atlas",
+    "sha256": "80b52895fc3fa0da41b40f27e11ff1b9aa1c51d0d802e6c99c9e40c990473c9d",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\page-rotate\\skeleton.atlas"
+  },
+  {
+    "path": "page-rotate/images/region_0.png",
+    "sha256": "b492e133ba9f469a0df073a0f145328c7c202abe669b8ac6f231f3adefdb979c",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\page-rotate\\images\\region_0.png"
+  },
+  {
+    "path": "page-index/skeleton.json",
+    "sha256": "ce99e7f8aa606c4a4b294f691c67b0cd16570da0480bf96b0380681950a0d28a",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\page-index\\skeleton.json"
+  },
+  {
+    "path": "page-index/skeleton.atlas",
+    "sha256": "d81434b36219501da2935ed8677b23b9974074fbd4f1743dab7c9686265e279c",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\page-index\\skeleton.atlas"
+  },
+  {
+    "path": "page-index/images/region_0.png",
+    "sha256": "b492e133ba9f469a0df073a0f145328c7c202abe669b8ac6f231f3adefdb979c",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\page-index\\images\\region_0.png"
+  },
+  {
+    "path": "duplicate-page-format/skeleton.json",
+    "sha256": "ce99e7f8aa606c4a4b294f691c67b0cd16570da0480bf96b0380681950a0d28a",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\duplicate-page-format\\skeleton.json"
+  },
+  {
+    "path": "duplicate-page-format/skeleton.atlas",
+    "sha256": "6d8c4a1ed3fe42d131344b58f5280dfc297bf7df5d38d94f5e6b5dc2d3b5f48b",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\duplicate-page-format\\skeleton.atlas"
+  },
+  {
+    "path": "duplicate-page-format/images/region_0.png",
+    "sha256": "b492e133ba9f469a0df073a0f145328c7c202abe669b8ac6f231f3adefdb979c",
+    "source": "verification\\P5\\independent-20261024-01\\atlas-probes\\duplicate-page-format\\images\\region_0.png"
+  }
+]

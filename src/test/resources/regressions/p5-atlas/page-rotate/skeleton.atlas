@@ -1,0 +1,15 @@
+images/region_0.png
+size: 64,48
+rotate: true
+format: RGBA8888
+filter: Nearest,Nearest
+repeat: none
+pma: false
+region_0
+  rotate: false
+  xy: 0,0
+  size: 64,48
+  orig: 64,48
+  offset: 0,0
+  index: -1
+

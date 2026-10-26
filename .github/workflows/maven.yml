@@ -24,7 +24,7 @@ jobs:
         cache: maven
 
     - name: Build and Publish with Maven
-      run: mvn -B deploy -s $GITHUB_WORKSPACE/settings.xml --file pom.xml
+      run: xvfb-run -a mvn -B deploy -s $GITHUB_WORKSPACE/settings.xml --file pom.xml
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
