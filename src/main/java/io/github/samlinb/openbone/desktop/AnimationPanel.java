@@ -405,7 +405,7 @@ final class AnimationPanel extends JPanel {
                 result.add(new TrackRow(b.id(), b.name() + " · " + c, c, keys));
             }
         for (var a : model().attachments())
-            if (a instanceof MeshAttachment) {
+            if (a instanceof MeshAttachment || a instanceof PathAttachment) {
                 var keys = model().animations().isEmpty() ? List.<Keyframe>of()
                         : model().animation(active()).deforms().stream().filter(t -> t.attachmentId().equals(a.id()))
                                 .flatMap(t -> t.keys().stream()).toList();

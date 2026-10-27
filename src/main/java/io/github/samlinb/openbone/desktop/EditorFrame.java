@@ -1488,6 +1488,10 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                 v -> edit(m("editorframe.0156"), d -> PathEdits.edit(d, id, p -> p.withOptions(v, p.constantSpeed()))));
         pathCheck("constantSpeed", m("editorframe.0157"), c.constantSpeed(),
                 v -> edit(m("editorframe.0158"), d -> PathEdits.edit(d, id, p -> p.withOptions(p.closed(), v))));
+        if(c.weighted()) {
+            text(m("pathattachment.weightedEditing"));
+            return;
+        }
         propertyButton(viewport.meshEditing() ? m("editorframe.0159") : m("editorframe.0160"),
                 () -> viewport.meshEditing(!viewport.meshEditing()));
         int index = Math.max(0, Math.min(c.vertices().size() - 1, viewport.meshIndex()));
@@ -1519,8 +1523,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                 return;
             guard(() -> edit(m("editorframe.0171"),
                     d -> PathEdits.edit(d, id,
-                            a -> new PathAttachment(a.id(), a.name(), a.slotId(), readClipRows(rows.getText()),
-                                    a.closed(), a.constantSpeed(), readLengths(lengths.getText())))));
+                            a -> a.withVertices(readClipRows(rows.getText())).withLengths(readLengths(lengths.getText())))));
         });
         text(m("editorframe.0172"));
     }

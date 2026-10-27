@@ -7,7 +7,7 @@ import io.github.samlinb.openbone.core.animation.*;
 import static io.github.samlinb.openbone.i18n.M.m;
 
 /**
- * Offset-key edits never overwrite Setup mesh points or bone-local influence
+ * Offset-key edits for meshes and paths never overwrite Setup points or bone-local influence
  * points.
  */
 public final class DeformEdits {
@@ -16,13 +16,13 @@ public final class DeformEdits {
 
     public static List<Double> offsets(DocumentSnapshot d, EntityId clip, EntityId mesh, double time) {
         return AnimationSampler.deforms(d, clip, time, false).getOrDefault(mesh,
-                Collections.nCopies(MeshEdits.mesh(d, mesh).deformSize(), 0.0));
+                Collections.nCopies(deformSize(d,mesh), 0.0));
     }
 
     public static DocumentSnapshot put(DocumentSnapshot d, EntityId clip, EntityId mesh, double time,
             List<Double> offsets) {
         Keyframe.seconds(time);
-        if (offsets.size() != MeshEdits.mesh(d, mesh).deformSize())
+        if (offsets.size() != deformSize(d,mesh))
             throw new IllegalArgumentException(m("deformedits.0001"));
         return AnimationEdits.clip(d, clip, a -> {
             var tracks = new ArrayList<>(a.deforms());
@@ -74,5 +74,12 @@ public final class DeformEdits {
     public static String layout(MeshAttachment m) {
         return m.vertices().size() + ":" + m.hull() + ":" + m.triangles() + ":"
                 + m.weights().stream().map(row -> row.stream().map(Influence::boneId).toList()).toList();
+    }
+
+    private static int deformSize(DocumentSnapshot document,EntityId id) {
+        var attachment=document.attachment(id);
+        if(attachment instanceof MeshAttachment mesh)return mesh.deformSize();
+        if(attachment instanceof PathAttachment path)return path.deformSize();
+        throw new IllegalArgumentException(m("documentsnapshot.0026"));
     }
 }

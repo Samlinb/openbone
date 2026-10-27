@@ -108,6 +108,10 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                     for (var i : influences)
                         if (!byBone.containsKey(i.boneId()))
                             throw new IllegalArgumentException(m("documentsnapshot.0001") + i.boneId());
+            if (attachment instanceof PathAttachment path)
+                for (var row:path.weights()) for (var influence:row)
+                    if (!byBone.containsKey(influence.boneId()))
+                        throw new IllegalArgumentException(m("documentsnapshot.0001") + influence.boneId());
         }
         resources.metadata().meshes().forEach((id, info) -> {
             if (!(byAttachment.get(id) instanceof MeshAttachment mesh))
@@ -197,6 +201,9 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                     throw new IllegalArgumentException(m("documentsnapshot.0016"));
                 if (!(c instanceof PhysicsConstraint) && descends(byBone, target, id))
                     throw new IllegalArgumentException(m("documentsnapshot.0017"));
+                if(c instanceof PathConstraint)
+                    for(var source:pathReadBones(c,attachments))if(descends(byBone,source,id))
+                        throw new IllegalArgumentException(m("documentsnapshot.0017"));
             }
             if (c instanceof IkConstraint ik && ik.boneIds().size() == 2
                     && !Objects.equals(byBone.get(ik.boneIds().get(1)).parentId(), ik.boneIds().get(0)))
@@ -228,7 +235,7 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             for (var writer : solving)
                 if (reader != writer && writer.order() > reader.order())
                     for (var id : writer.boneIds())
-                        if (descends(byBone, reader.targetBone(slots), id) || reader.boneIds().stream()
+                        if (descends(byBone, reader.targetBone(slots), id) || pathReadBones(reader,attachments).stream().anyMatch(source->descends(byBone,source,id)) || reader.boneIds().stream()
                                 .anyMatch(prior -> !prior.equals(id) && descends(byBone, prior, id)))
                             throw new IllegalArgumentException(m("documentsnapshot.0022"));
         for (var reader : solving)
@@ -252,11 +259,13 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             }
             for (var track : clip.deforms()) {
                 var a = byAttachment.get(track.attachmentId());
-                if (!(a instanceof MeshAttachment m))
+                int size=a instanceof MeshAttachment mesh ? mesh.deformSize()
+                        : a instanceof PathAttachment path ? path.deformSize() : -1;
+                if (size < 0)
                     throw new IllegalArgumentException(m("documentsnapshot.0026"));
                 for (var key : track.keys()) {
                     unique(ids, key.id(), "ID");
-                    if (key.values().size() != m.deformSize())
+                    if (key.values().size() != size)
                         throw new IllegalArgumentException(m("documentsnapshot.0027"));
                 }
             }
@@ -293,6 +302,14 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             id = bones.get(id).parentId();
         }
         return false;
+    }
+
+    private static Set<EntityId> pathReadBones(Constraint constraint,List<Attachment> attachments) {
+        var sources=new HashSet<EntityId>();
+        if(constraint instanceof PathConstraint path)for(var attachment:attachments)
+            if(attachment instanceof PathAttachment geometry&&geometry.slotId().equals(path.targetId()))
+                for(var row:geometry.weights())for(var influence:row)sources.add(influence.boneId());
+        return sources;
     }
 
     private static boolean writes(Constraint c) {
@@ -482,7 +499,7 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                     if (path instanceof PathAttachment p) {
                         var target = world.get(targetSlot.boneId());
                         worldOverrides.putAll(io.github.samlinb.openbone.core.math.PathConstraintSolver.bounds(pc, p,
-                                target[0], target[1], world, bones));
+                                target[0], target[1], world, bones,DeformTimeline.bounds(clip,p.id(),p.deformSize())));
                     }
                 }
                 if (stage instanceof PhysicsConstraint pc && pc.mix() != 0) {
@@ -516,8 +533,7 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             for (var a : attachments) {
                 if (a instanceof PathAttachment path) {
                     var p = world.get(bySlot.get(path.slotId()).boneId());
-                    for (var v : path.vertices())
-                        positionNormBound(p[0], p[1], v.x(), v.y(), "animation path control bound");
+                    path.controlBound(world,p[0],p[1],DeformTimeline.bounds(clip,path.id(),path.deformSize()));
                     continue;
                 }
                 if (a instanceof ClippingAttachment c) {

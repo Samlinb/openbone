@@ -23,8 +23,12 @@ public final class PathConstraintSolver {
      */
     public static Map<EntityId, double[]> bounds(PathConstraint c, PathAttachment path, double targetNorm,
             double targetPosition, Map<EntityId, double[]> world, List<Bone> bones) {
-        double local = path.vertices().stream().mapToDouble(v -> Math.hypot(v.x(), v.y())).max().orElseThrow(),
-                control = Finite.require(targetPosition + targetNorm * local, "path control envelope"),
+        return bounds(c,path,targetNorm,targetPosition,world,bones,new double[path.deformSize()]);
+    }
+
+    public static Map<EntityId, double[]> bounds(PathConstraint c, PathAttachment path, double targetNorm,
+            double targetPosition, Map<EntityId, double[]> world, List<Bone> bones, double[] deform) {
+        double control = path.controlBound(world,targetNorm,targetPosition,deform),
                 total = path.constantSpeed() ? Finite.require(16 * control * path.curveCount(), "path length envelope")
                         : path.lengths().get(path.curveCount() - 1),
                 space = 0;
@@ -151,7 +155,7 @@ public final class PathConstraintSolver {
     }
 
     static void apply(PathConstraint c, List<Bone> bones, List<Slot> slots, List<Attachment> attachments,
-            Map<EntityId, Affine2> world, Map<EntityId, Affine2> locked) {
+            Map<EntityId, Affine2> world, Map<EntityId, Affine2> locked, Map<EntityId,List<Double>> deforms) {
         if (c.inactive())
             return;
         var slot = slots.stream().filter(s -> s.id().equals(c.targetId())).findFirst().orElseThrow();
@@ -160,7 +164,7 @@ public final class PathConstraintSolver {
         if (!(attachment instanceof PathAttachment path))
             return;
         var target = world.get(slot.boneId());
-        var controls = path.vertices().stream().map(v -> target.apply(v.x(), v.y())).toList();
+        var controls = path.worldVertices(world,target,deforms.get(path.id()));
         double total = pathLength(path, controls);
         boolean tangents = c.rotateMode() == PathConstraint.RotateMode.TANGENT,
                 scale = c.rotateMode() == PathConstraint.RotateMode.CHAIN_SCALE;

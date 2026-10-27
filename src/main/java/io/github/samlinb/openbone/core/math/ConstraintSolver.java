@@ -25,6 +25,12 @@ public final class ConstraintSolver {
 
     public static Map<EntityId, Affine2> evaluate(List<Bone> bones, Map<EntityId, Transform> pose,
             List<Constraint> constraints, List<Slot> slots, List<Attachment> attachments, PhysicsFrame physics) {
+        return evaluate(bones,pose,constraints,slots,attachments,physics,Map.of());
+    }
+
+    public static Map<EntityId, Affine2> evaluate(List<Bone> bones, Map<EntityId, Transform> pose,
+            List<Constraint> constraints, List<Slot> slots, List<Attachment> attachments, PhysicsFrame physics,
+            Map<EntityId,List<Double>> deforms) {
         var local = new LinkedHashMap<EntityId, Transform>();
         Map<EntityId, Double> shear = new HashMap<>();
         Map<EntityId, Affine2> locked = new HashMap<>();
@@ -52,7 +58,7 @@ public final class ConstraintSolver {
                 TransformConstraintSolver.apply(transform, local, world, shear, locked);
                 rebuild(bones, local, world, shear, locked);
             } else if (c instanceof PathConstraint path) {
-                PathConstraintSolver.apply(path, bones, slots, attachments, world, locked);
+                PathConstraintSolver.apply(path, bones, slots, attachments, world, locked, deforms);
                 rebuild(bones, local, world, shear, locked);
             } else if (c instanceof PhysicsConstraint p && physics.mode() != PhysicsSolver.Mode.NONE) {
                 var bone = bones.stream().filter(b -> b.id().equals(p.boneId())).findFirst().orElseThrow();

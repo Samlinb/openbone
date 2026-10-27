@@ -42,6 +42,9 @@ public final class RuntimeRange {
     }
 
     public static void validate(DocumentSnapshot d) throws ProjectFormatException {
+        for(var attachment:d.attachments())if(attachment instanceof PathAttachment path
+                &&(path.weighted()||d.animations().stream().flatMap(a->a.deforms().stream()).anyMatch(t->t.attachmentId().equals(path.id()))))
+            throw new ProjectFormatException(io.github.samlinb.openbone.i18n.M.m("pathattachment.runtimeExport"));
         P8Range.validate(d);
         if (d.animations().stream().anyMatch(a -> !a.constraintTracks().isEmpty())) {
             ConstraintTimelineFloatCertificate.validate(d);

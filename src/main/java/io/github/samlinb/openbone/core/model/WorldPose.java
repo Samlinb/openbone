@@ -111,7 +111,7 @@ public record WorldPose(Map<EntityId, BoneWorld> bones, Map<EntityId, RegionWorl
             Map<EntityId, Transform> pose, Map<EntityId, List<Double>> deforms, List<Constraint> constraints,
             PhysicsFrame physics) {
         Map<EntityId, BoneWorld> worlds = new LinkedHashMap<>();
-        var matrices = ConstraintSolver.evaluate(setup, pose, constraints, slots, attachments, physics);
+        var matrices = ConstraintSolver.evaluate(setup, pose, constraints, slots, attachments, physics, deforms);
         Set<EntityId> remaining = new HashSet<>(pose.keySet());
         for (Bone bone : setup) {
             remaining.remove(bone.id());
@@ -135,8 +135,9 @@ public record WorldPose(Map<EntityId, BoneWorld> bones, Map<EntityId, RegionWorl
                 continue;
             }
             if (attachment instanceof PathAttachment p) {
+                remainingDeforms.remove(p.id());
                 var matrix = worlds.get(bySlot.get(p.slotId()).boneId()).matrix();
-                paths.put(p.id(), p.vertices().stream().map(v -> matrix.apply(v.x(), v.y())).toList());
+                paths.put(p.id(), p.worldVertices(matrices,matrix,deforms.get(p.id())));
                 continue;
             }
             if (attachment instanceof ClippingAttachment c) {

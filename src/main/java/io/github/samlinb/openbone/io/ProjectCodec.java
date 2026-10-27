@@ -38,7 +38,7 @@ public final class ProjectCodec {
                 throw bad("$.schemaVersion", "Missing required field");
             JsonNode version = root.get("schemaVersion");
             if (!version.isIntegralNumber() || !version.canConvertToInt() || version.intValue() < 1
-                    || version.intValue() > 10)
+                    || version.intValue() > 11)
                 throw bad("$.schemaVersion", "Unsupported schema version: " + version);
             if (version.intValue() == 1)
                 fields(root, "$", "schemaVersion", "bones", "slots", "attachments");
@@ -80,10 +80,11 @@ public final class ProjectCodec {
             for (JsonNode n : array(root, "attachments", "$")) {
                 String p = "$.attachments[" + index++ + "]";
                 if (text(n, "type", p).equals("path") && version.intValue() >= 4) {
-                    fields(n, p, "type", "id", "name", "slotId", "vertices", "closed", "constantSpeed", "lengths");
+                    if(version.intValue()>=11)fields(n, p, "type", "id", "name", "slotId", "vertices", "closed", "constantSpeed", "lengths","weights");
+                    else fields(n, p, "type", "id", "name", "slotId", "vertices", "closed", "constantSpeed", "lengths");
                     attachments.add(new PathAttachment(id(n, "id", p), text(n, "name", p), id(n, "slotId", p),
                             points(n, "vertices", p), bool(n, "closed", p), bool(n, "constantSpeed", p),
-                            numbers(n, "lengths", p)));
+                            numbers(n, "lengths", p),readPathWeights(n,p)));
                     continue;
                 }
                 if (text(n, "type", p).equals("clipping") && version.intValue() >= 3) {
@@ -306,6 +307,31 @@ public final class ProjectCodec {
         }
     }
 
+    private static boolean needsPathGeometry(DocumentSnapshot d) {
+        var paths=new HashSet<EntityId>();
+        for(var attachment:d.attachments())if(attachment instanceof PathAttachment path) {
+            if(path.weighted())return true;
+            paths.add(path.id());
+        }
+        return d.animations().stream().flatMap(a->a.deforms().stream()).anyMatch(t->paths.contains(t.attachmentId()));
+    }
+
+    private static List<List<Influence>> readPathWeights(JsonNode node,String path) throws ProjectFormatException {
+        if(!node.has("weights"))return List.of();
+        var weights=new ArrayList<List<Influence>>();
+        for(var row:array(node,"weights",path)) {
+            if(!row.isArray())throw bad(path+".weights","Expected influence array");
+            var values=new ArrayList<Influence>();
+            for(var influence:row) {
+                fields(influence,path+".weights","boneId","x","y","weight");
+                values.add(new Influence(id(influence,"boneId",path),new io.github.samlinb.openbone.core.math.Vec2(
+                        number(influence,"x",path),number(influence,"y",path)),number(influence,"weight",path)));
+            }
+            weights.add(values);
+        }
+        return weights;
+    }
+
     private static boolean needsExtendedAnimation(DocumentSnapshot d) {
         return d.bones().stream().anyMatch(b -> b.local().shearX() != 0 || b.local().shearY() != 0)
                 || d.attachments().stream().anyMatch(a -> a instanceof BoundingBoxAttachment
@@ -318,7 +344,7 @@ public final class ProjectCodec {
     public byte[] encode(DocumentSnapshot model) throws IOException {
         Objects.requireNonNull(model, "model");
         ObjectNode root = mapper.createObjectNode();
-        root.put("schemaVersion", needsExtendedAnimation(model) ? 10 : !model.resources().metadata().equals(SpineMetadata.EMPTY) ? 9
+        root.put("schemaVersion", needsPathGeometry(model) ? 11 : needsExtendedAnimation(model) ? 10 : !model.resources().metadata().equals(SpineMetadata.EMPTY) ? 9
                 : model.bones().stream().anyMatch(b -> !b.color().equals(Rgba.WHITE) || b.inherit() != Bone.Inherit.normal) ? 8
                 : model.slots().stream().anyMatch(s -> !s.color().equals(Rgba.WHITE))
                 || model.animations().stream().anyMatch(a -> !a.discrete().colors().isEmpty()) ? 7 : P8ProjectJson.needed(model) ? 6
@@ -368,6 +394,14 @@ public final class ProjectCodec {
                         .put("constantSpeed", path.constantSpeed());
                 putPoints(n.putArray("vertices"), path.vertices());
                 path.lengths().forEach(n.putArray("lengths")::add);
+                if(path.weighted()) {
+                    var weights=n.putArray("weights");
+                    for(var row:path.weights()) {
+                        var influences=weights.addArray();
+                        for(var influence:row)influences.addObject().put("boneId",influence.boneId().value())
+                                .put("x",influence.point().x()).put("y",influence.point().y()).put("weight",influence.weight());
+                    }
+                }
                 continue;
             }
             if (a instanceof ClippingAttachment c) {

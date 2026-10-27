@@ -47,12 +47,14 @@ public final class EditorMcpTools {
     public ArrayNode definitions() {
         ArrayNode tools = JSON.createArrayNode();
         add(tools, "openbone_get_context", "Read the current live project summary, selection, view and revision. Query scene for IDs and keyframes.", schema("{}"), true);
-        add(tools, "openbone_query_scene", "Read a page of bones, animations, keyframes, slots, attachments or constraints. IDs are UUID strings. Use revision to keep pages consistent.", schema("""
+        add(tools, "openbone_query_scene", AnimationMcpQueries.message("description"), schema("""
             {"kind":{"enum":["bones","animations","keyframes","slots","attachments","constraints"]},
              "animationId":{"type":"string"},"boneId":{"type":"string"},"expectedRevision":{"type":"string"},
+             "trackType":{"enum":["bone","non_bone","all","deform","constraint","slot_color","attachment","draw_order","event"]},
+             "targetId":{"type":"string"},"channel":{"type":"string","minLength":1,"maxLength":64},
              "offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":200}}
             """, "kind"), true);
-        add(tools, "openbone_apply_edits", "Build and edit the live scene atomically in one undo step. Supports bones/reparent, slots/order, local PNG regions, animations and keyframes. Setup transforms are absolute LOCAL values; keyframe translation/rotation/shear are offsets from Setup (degrees); scale is a multiplier. UUIDs are caller-created. PNGs are validated before publication, linked by absolute path, not copied. curve may be linear, stepped or {kind:bezier,x1,y1,x2,y2} fractions of a segment. Retry with the SAME requestId and arguments.", editSchema(), false);
+        add(tools, "openbone_apply_edits", AnimationMcpEdits.message("description"), editSchema(), false);
         add(tools, "openbone_capture_preview", "Seek exact seconds, pause and capture the real GL viewport as PNG, max 1024 pixels per side. Optional fit frames visible geometry; showBones/showGrid can hide editing overlays. Options persist in the editor. Requires a visible window. Capture multiple times to inspect motion; no undo history.", schema("""
             {"animationId":{"type":"string"},"time":{"type":"number","minimum":0,"maximum":600},"expectedRevision":{"type":"string"},"fit":{"type":"boolean"},"showBones":{"type":"boolean"},"showGrid":{"type":"boolean"}}
             """, "animationId", "time", "expectedRevision"), false);
@@ -87,6 +89,7 @@ public final class EditorMcpTools {
             """, "expectedRevision", "requestId", "edits");
         var variants=(ArrayNode)s.path("properties").path("edits").path("items").path("oneOf");
         variants.addAll(SceneMcpEdits.schemas(JSON));
+        variants.addAll(AnimationMcpEdits.schemas(JSON));
         try {
             ((ObjectNode)variants.get(1).path("properties")).set("curve",JSON.readTree("""
                 {"oneOf":[{"enum":["linear","stepped"]},{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"bezier"},"x1":{"type":"number","minimum":0,"maximum":1},"y1":{"type":"number"},"x2":{"type":"number","minimum":0,"maximum":1},"y2":{"type":"number"}},"required":["kind","x1","y1","x2","y2"]}]}
@@ -154,7 +157,7 @@ public final class EditorMcpTools {
         data.put("revision", h.revision());
         data.put("version",io.github.samlinb.openbone.EditorApplication.version());
         data.put("mcpApiVersion",2);
-        data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",true,"cleanPreview",true,"atomicEdits",true));
+        data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",true,"cleanPreview",true,"atomicEdits",true,"nonBoneKeyframeQuery",true,"nonBoneKeyframeEdits",true));
         data.put("spineIO",Map.of("versions",io.github.samlinb.openbone.io.SpineVersion.exportVersions(),"formats",List.of("JSON","BINARY","NATIVE"),"nativeCliConfigured",io.github.samlinb.openbone.io.SpineCliBridge.configured()));
         data.put("dirty", h.isDirty());
         data.put("busy", h.isPreviewing());
@@ -169,10 +172,15 @@ public final class EditorMcpTools {
     }
 
     private Map<String, Object> query(JsonNode a) {
-        fields(a, "kind", "animationId", "boneId", "expectedRevision", "offset", "limit");
+        fields(a, "kind", "animationId", "boneId", "expectedRevision", "offset", "limit", "trackType", "targetId", "channel");
         if (a.has("expectedRevision")) checkRevision(text(a, "expectedRevision", 128));
         var d = host.history().state().model();
         int offset = integer(a, "offset", 0, 0, Integer.MAX_VALUE), limit = integer(a, "limit", 50, 1, 200);
+        if (a.has("trackType") || a.has("targetId") || a.has("channel")) {
+            if (!text(a, "kind", 32).equals("keyframes"))
+                throw new IllegalArgumentException(AnimationMcpQueries.message("keyframeFilters"));
+            return AnimationMcpQueries.query(d, a, host.history().revision(), offset, limit, JSON);
+        }
         java.util.stream.Stream<JsonNode> rows;
         long total;
         switch (text(a, "kind", 32)) {
@@ -186,7 +194,7 @@ public final class EditorMcpTools {
             }
             case "animations" -> {
                 total = d.animations().size();
-                rows = d.animations().stream().map(c -> JSON.valueToTree(Map.of("id", c.id().value(), "name", c.name(), "duration", c.duration(), "keyCount", c.keys().size())));
+                rows = d.animations().stream().map(c -> AnimationMcpQueries.summary(c, JSON));
             }
             case "keyframes" -> {
                 EntityId clip = id(a, "animationId");
@@ -200,7 +208,19 @@ public final class EditorMcpTools {
             case "slots" -> { total = d.slots().size(); rows = d.slots().stream().map(JSON::valueToTree); }
             case "attachments" -> {
                 total = d.attachments().size();
-                rows = d.attachments().stream().map(t -> JSON.valueToTree(t instanceof RegionAttachment r ? Map.of("id",r.id().value(),"name",r.name(),"slotId",r.slotId().value(),"type","RegionAttachment","source",r.source(),"setup",r.local(),"width",r.width(),"height",r.height()) : Map.of("id",t.id().value(),"name",t.name(),"slotId",t.slotId().value(),"type",t.getClass().getSimpleName())));
+                rows = d.attachments().stream().map(t -> {
+                    if(t instanceof PathAttachment path) {
+                        var row=JSON.createObjectNode().put("id",path.id().value()).put("name",path.name())
+                                .put("slotId",path.slotId().value()).put("type","PathAttachment")
+                                .put("weighted",path.weighted()).put("vertexCount",path.vertices().size())
+                                .put("deformSize",path.deformSize()).put("closed",path.closed()).put("constantSpeed",path.constantSpeed());
+                        row.set("vertices",JSON.valueToTree(path.vertices()));
+                        row.set("weights",JSON.valueToTree(path.weights()));
+                        row.set("lengths",JSON.valueToTree(path.lengths()));
+                        return row;
+                    }
+                    return JSON.valueToTree(t instanceof RegionAttachment r ? Map.of("id",r.id().value(),"name",r.name(),"slotId",r.slotId().value(),"type","RegionAttachment","source",r.source(),"setup",r.local(),"width",r.width(),"height",r.height()) : Map.of("id",t.id().value(),"name",t.name(),"slotId",t.slotId().value(),"type",t.getClass().getSimpleName()));
+                });
             }
             case "constraints" -> { total = d.constraints().size(); rows = d.constraints().stream().map(JSON::valueToTree); }
             default -> throw new IllegalArgumentException("Unknown kind. Use bones, animations, keyframes, slots, attachments or constraints.");
@@ -293,6 +313,7 @@ public final class EditorMcpTools {
                 }
                 yield AnimationEdits.remove(d, id(e, "animationId"), ids);
             }
+            case "put_constraint_keyframe", "put_deform_keyframe" -> AnimationMcpEdits.apply(d, e, op);
             default -> SceneMcpEdits.apply(d,e,op);
         };
     }

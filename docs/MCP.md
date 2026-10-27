@@ -39,6 +39,8 @@ Known stable families 3.8, 4.0, 4.1, 4.2 and 4.3 have explicit JSON/binary route
 
 `openbone_get_context.data.spineIO` lists export markers, formats and `nativeCliConfigured`. That flag reports configuration, not license availability. Native conversion executes outside EDT, rejects Trial output, validates output and uses a 120-second process timeout; clients should allow longer request timeouts. `OPENBONE_SPINE_COMMAND` or `-Dopenbone.spine.command=...` selects the separate executable. Native acceptance is pending a licensed installation; the local Trial cannot verify it.
 
+`openbone_query_scene` with `kind: "attachments"` includes `weighted`, `vertexCount`, `deformSize`, `weights`, `vertices`, `closed`, `constantSpeed` and `lengths` for paths. Each influence has `boneId.value` (the UUID), `point` in that bone's local coordinates and a normalized `weight`. A weighted path's `vertices` supplies control count only; its influence points determine geometry. Deform offsets are per-influence XY pairs, applied before skinning and path solving. JSON import, preview and portable save retain this data in project schema 11. Direct weighted control-point edits and runtime export are currently unavailable; bone/keyframe edits and undo keep their existing contracts. See [Stretchyman acceptance and limits](SPINE_VERSION_COMPATIBILITY.md#stretchyman-json-acceptance).
+
 ## Starting and connecting
 
 1. Build and start the latest program: `mvn package`, then run `java -jar target/openbone-0.2.1.jar` (the file name depends on the current POM version).
@@ -70,13 +72,37 @@ Successful results contain `content` text and `structuredContent.data`; previews
 | Tool | Input | Output |
 | --- | --- | --- |
 | `openbone_get_context` | Empty object | Version, counts, selection, dirty state, undo information, current animation and time |
-| `openbone_query_scene` | `kind`; optional `offset`, `limit`, `expectedRevision`; keyframes require `animationId` and can filter by `boneId` | Paginated records, revision, `total`, `hasMore`, `nextOffset` |
+| `openbone_query_scene` | `kind`; optional `offset`, `limit`, `expectedRevision`; keyframes require `animationId`, support `boneId`, `trackType`, `targetId`, `channel` | Paginated records, revision, `total`, `hasMore`, `nextOffset` |
 | `openbone_apply_edits` | `expectedRevision`, `requestId`, `edits`, optional `label` | Summary after modification, with the whole batch as one undo step |
 | `openbone_capture_preview` | `expectedRevision`, `animationId`, `time` | Actual viewport PNG, revision, time, world coordinates of the first 200 bones |
 | `openbone_undo` | `expectedRevision`, `requestId` | Summary after undoing one step |
 | `openbone_redo` | `expectedRevision`, `requestId` | Summary after redoing one step |
 
-`kind` supports `bones`, `animations`, `keyframes`, `slots`, `attachments`, and `constraints`. Pages default to 50 records and allow at most 200. Keyframe queries currently return only bone TRS and shear tracks; they do not include deform, constraint, or discrete tracks. Attachment queries return summaries. Bone queries include the parent, setup transform, and inherit mode. All IDs are canonical UUID strings.
+`kind` supports `bones`, `animations`, `keyframes`, `slots`, `attachments`, and `constraints`. Pages default to 50 records and allow at most 200. Existing keyframe calls default to bone TRS/shear tracks and retain their record format. Set `trackType` to `all`, `non_bone`, `bone`, `deform`, `constraint`, `slot_color`, `attachment`, `draw_order`, or `event` to request typed records. Context advertises this additive API-v2 capability as `nonBoneKeyframeQuery`. Refresh `tools/list` (or reconnect clients that cache schemas) after upgrading. Attachment queries return summaries. Bone queries include the parent, setup transform, and inherit mode. All IDs are canonical UUID strings.
+
+Typed keyframe queries filter by exact `targetId` and/or uppercase `channel` before pagination; omitted `trackType` still means `bone`. `boneId` can accompany `bone` or `all` and restricts results to that bone's own tracks, not attachments or constraints that reference it. A valid target with no matching tracks returns an empty page; malformed/unknown IDs, unknown channels, conflicting bone/target filters and filters on another `kind` fail without changing editor state. Use `expectedRevision` on every page; edits, undo, redo and project changes invalidate old pages. Repeating a read with identical arguments at the same revision returns the same records without a `requestId`.
+
+Records follow type order (bone, deform, constraint, slot_color, attachment, draw_order, event), then model track order and chronological key order within each track. This is not a global time sort. Typed pages include `animationKeyCounts` for the entire animation, independent of filters. Animation summaries expose the same breakdown in `keyCounts` plus `totalKeyCount`, including all continuous and discrete keys. Legacy `keyCount` keeps its former meaning: bone + deform + constraint keys. Bone, constraint and deform keys can be written/removed when context advertises `nonBoneKeyframeEdits`; slot-color and discrete tracks are currently read-only through MCP.
+
+| Track type | Target ID | Payload and semantics |
+| --- | --- | --- |
+| `bone` | Bone UUID | `boneId`, channel, `values`, outgoing per-component `curves`; local Setup offsets (degrees for rotation/shear), scale factors |
+| `deform` | Attachment UUID | `attachmentId`, `slotId`, `attachmentType`, full `values`/`curves`; local XY offsets from Setup in project units. `valueBindings` maps each XY pair's `valueOffset` to `vertexIndex` and, when weighted, `influenceIndex`/`boneId`. Weighted offsets apply in each influence bone's local space before skinning; unweighted offsets use slot-bone local space. A zero pair preserves Setup; it does not move the vertex to the origin. |
+| `constraint` | Constraint UUID | `constraintId`, absolute parameter `values`, stable `components`, outgoing `curves`, `discreteComponents`; IK order is mix, softness, bendPositive, compress, stretch. Mix is a factor, softness is in project units, and flags are 0/1 with stepped curves. Path position/spacing uses the returned `positionMode`/`spacingMode`; PERCENT uses fractions, FIXED/LENGTH uses project units, PROPORTIONAL is relative. Transform/path mix components are factors; physics parameters keep their model units. |
+| `slot_color` | Slot UUID | `slotId`, RGBA/RGB/ALPHA, absolute normalized color `values`, component names and outgoing `curves` |
+| `attachment` | Slot UUID | `slotId`, `name` (JSON null clears the attachment); stepped switching, no interpolated `values` or curves |
+| `draw_order` | Animation UUID | `slots` contains the complete ordered slot UUID list; stepped switching |
+| `event` | Event-definition UUID | `eventId`, `intValue`, `floatValue`, `stringValue`, `volume`, `balance`; instantaneous trigger, no invented interpolation curves |
+
+Every typed row includes `trackType`, `targetId`, `targetName`, `channel`, `interpolation`, key `id` and `time` in seconds. Continuous curves belong to the outgoing segment and use the existing normalized linear/stepped/Bezier representation. Querying does not seek, pause, evaluate a pose, save, or affect dirty state/history.
+
+For example, discover the live `sneak` UUID and revision, then call:
+
+```json
+{"name":"openbone_query_scene","arguments":{"kind":"keyframes","animationId":"<sneak UUID>","trackType":"non_bone","expectedRevision":"<current revision>","offset":0,"limit":200}}
+```
+
+Use `trackType: "deform"` with an attachment `targetId` to inspect a single path. Keep `expectedRevision` and use `nextOffset` until `hasMore` is false. The Stretchyman regression fixture returns 334 bone keys plus 33 non-bone keys; `all` returns 367.
 
 Constraint queries include disabled constraints and constraints with zero mix throughout Setup and every animation. These remain part of the editable project without claiming solver output. Active writer overlaps remain unsupported; see [inactive constraint import and validation](PROJECT_DRIVEN_DEVELOPMENT.md#inactive-constraint-import-2026-10-26). The query contract and connection settings are unchanged.
 
@@ -84,7 +110,20 @@ Each batch accepts 1 to 500 sequential operations:
 
 - `create_animation`: `animationId`, `name`. The client generates the new UUID, and later operations in the same batch can reference it.
 - `put_keyframe`: `animationId`, `boneId`, `channel`, `time`, `values`, optional `curve`. Replaces and keeps the keyframe ID for the same track at exactly the same time. Omitting `curve` preserves the original curve, new keys default to linear, and `linear` and `stepped` are explicitly supported.
-- `remove_keyframes`: `animationId`, `keyIds`. Unknown or duplicate IDs fail the entire batch.
+- `put_constraint_keyframe`: `animationId`, `constraintId`, `channel`, `time`, `values`, optional `curve`. Reuses desktop `AnimationEdits.putConstraint`. Values are absolute parameters in the typed query's `components` order (1–6 values depending on channel). For `IK`, use `[mix, softness, bendPositive, compress, stretch]`; flags must be 0/1 and their curves remain stepped even when a Bezier curve is supplied. All existing constraint channels are supported; type/parameter validation runs before publication.
+- `put_deform_keyframe`: `animationId`, `attachmentId`, `time`, `values`, optional `curve`. Reuses desktop `DeformEdits.put` for existing mesh/path attachments. Send the complete array with exactly `deformSize` components, at most 65536, in the queried `valueBindings` order. Values are local XY offsets from Setup, per influence for weighted attachments; a single outgoing curve applies to every component. Shape correction can preserve endpoint pairs without changing Setup vertices or weights.
+- `remove_keyframes`: `animationId`, `keyIds`, for stored bone, constraint and deform keys. Unknown or duplicate IDs fail the entire batch; unsupported discrete/color keys are not removed.
+
+The two non-bone write operations use the existing `linear`/`stepped`/Bezier curve contract, preserve IDs when replacing the same target/channel/time, and preserve prior curves when `curve` is omitted. Mixed bone/constraint/deform batches validate an immutable candidate, publish in one history step, and share the same revision checks, exact-request retry receipts, undo/redo and portable save behavior. They do not create constraints, attachments, meshes, topology or weights. Example IK activation and zero deform (replace placeholders and provide the complete array):
+
+```json
+{"expectedRevision":"<revision>","requestId":"author-controls-01","label":"Author controls and path shape","edits":[
+  {"op":"put_constraint_keyframe","animationId":"<new animation UUID>","constraintId":"<arm IK UUID>","channel":"IK","time":0,"values":[0,0,1,0,0]},
+  {"op":"put_deform_keyframe","animationId":"<new animation UUID>","attachmentId":"<path UUID>","time":0,"values":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"curve":"linear"}
+]}
+```
+
+`AnimationMcpEditsTest` covers mixed atomic batches, failed-state/redo preservation, replacement semantics, retries, revision conflicts, heterogeneous removal and portable save/load. The Stretchyman desktop test creates a fresh clip through MCP, writes IK/deform keys, captures the real GL viewport and undoes the complete batch. The independent `sneak_rebuilt` production case uses Setup-based rules rather than copying reference animation tracks; its artifacts, request ledger and actual captures are under `creations/sneak-rebuilt-20261027/`.
 
 Coordinates are local, with X to the right and Y up; time is in seconds; angles are in degrees with counterclockwise positive.
 

@@ -546,7 +546,8 @@ final class Spine40Binary {
                     int from=in.readUnsignedByte();double offset=number();int count=in.readUnsignedByte();
                     if(from>=6||offset!=0||count!=1)throw unsupported("4.3 remapped transform property");
                     int to=in.readUnsignedByte();double toOffset=number(),max=number(),scale=number();
-                    if(to!=from||toOffset!=0||max!=1||scale!=1||active[from])throw unsupported("4.3 cross-property transform");active[from]=true;
+                    // max only participates when clamp is enabled (rejected above).
+                    if(to!=from||toOffset!=0||scale!=1||active[from])throw unsupported("4.3 cross-property transform");active[from]=true;
                 }
                 optionalFloats(c,in.readUnsignedByte(),0,"rotation","x","y","scaleX","scaleY","shearY");
                 String[] mixes={"mixRotate","mixX","mixY","mixScaleX","mixScaleY","mixShearY"};int mixFlags=in.readUnsignedByte();
