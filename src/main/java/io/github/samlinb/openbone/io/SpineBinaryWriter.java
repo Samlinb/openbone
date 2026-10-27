@@ -281,9 +281,13 @@ public final class SpineBinaryWriter {
                     if(previous!=null){if(previous.path("curve").isTextual())flags|=64;else if(previous.path("curve").isArray())flags|=128;}
                     out.writeByte(flags);floats(key,"time","mix","softness");if((flags&128)!=0)values(previous.path("curve"));
                 }else{
-                    floats(key,"time","mix","softness");if(!family.legacy()&&i>0)curve(keys.get(i-1),key,new String[]{"mix","softness"},2,false);
+                    if (family.legacy() || i==0) floats(key,"time","mix","softness");
                     out.writeByte(key.path("bendPositive").asBoolean(true)?1:-1);out.writeBoolean(key.path("compress").asBoolean());out.writeBoolean(key.path("stretch").asBoolean());
                     if(family.legacy()&&i+1<keys.size())curve(key,keys.get(i+1),new String[]{"mix","softness"},2,false);
+                    if(!family.legacy()&&i+1<keys.size()) {
+                        floats(keys.get(i+1),"time","mix","softness");
+                        curve(key,keys.get(i+1),new String[]{"mix","softness"},2,false);
+                    }
                 }
             }
         }

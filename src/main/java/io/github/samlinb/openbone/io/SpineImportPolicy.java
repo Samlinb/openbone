@@ -44,14 +44,18 @@ public final class SpineImportPolicy {
     }
     public static Selection select(byte[] bytes,Format format,Approval approval)throws IOException {
         String source=switch(format){case BINARY->binaryVersion(bytes);case NATIVE->SpineNativeHeader.read(bytes).version();case JSON->new ProjectCodec().parseTree(bytes).path("skeleton").path("spine").asText();};
-        Selection selection=plan(source,format,hash(bytes));
+        Selection selection=format==Format.JSON && source.isEmpty()
+                ? new Selection("unspecified",format,Parser.JSON_38,hash(bytes),false)
+                : plan(source,format,hash(bytes));
         if(approval!=null&&!selection.approval().equals(approval))throw new ProjectFormatException(m("spineImport.approvalChanged"));
         if(!selection.known()&&approval==null)throw new SpineVersionRiskException(selection);
         return selection;
     }
     public static boolean isJsonExport(byte[] bytes)throws IOException {
         var tree=new ProjectCodec().parseTree(bytes);
-        return !tree.has("schemaVersion")&&tree.path("skeleton").has("spine");
+        return !tree.has("schemaVersion") && (tree.path("skeleton").has("spine")
+                || tree.path("skeleton").isObject() && tree.path("bones").isArray() && tree.path("slots").isArray()
+                && (tree.path("skins").isArray() || tree.path("skins").isObject()));
     }
     static Selection plan(String source,Format format,String hash)throws ProjectFormatException {
         Version actual=version(source);

@@ -112,6 +112,9 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                 for (var row:path.weights()) for (var influence:row)
                     if (!byBone.containsKey(influence.boneId()))
                         throw new IllegalArgumentException(m("documentsnapshot.0001") + influence.boneId());
+            if(attachment instanceof ClippingAttachment clip)
+                for(var row:clip.weights())for(var influence:row)
+                    if(!byBone.containsKey(influence.boneId()))throw new IllegalArgumentException(m("documentsnapshot.0001")+influence.boneId());
         }
         resources.metadata().meshes().forEach((id, info) -> {
             if (!(byAttachment.get(id) instanceof MeshAttachment mesh))
@@ -129,9 +132,9 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                 var end = bySlot.get(c.endSlotId());
                 if (end == null)
                     throw new IllegalArgumentException(m("documentsnapshot.0002"));
-                if (slots.indexOf(end) <= slots.indexOf(bySlot.get(c.slotId())))
+                if (!c.runtimeTopology() && slots.indexOf(end) <= slots.indexOf(bySlot.get(c.slotId())))
                     throw new IllegalArgumentException(m("documentsnapshot.0003"));
-                if (byAttachment.get(end.activeAttachmentId()) instanceof ClippingAttachment)
+                if (!c.runtimeTopology() && byAttachment.get(end.activeAttachmentId()) instanceof ClippingAttachment)
                     throw new IllegalArgumentException(m("documentsnapshot.0004"));
             }
         Set<String> skinNames = new HashSet<>();
@@ -174,9 +177,9 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             for (var k : clip.discrete().attachments()) {
                 if (!slotIds.contains(k.slotId()))
                     throw new IllegalArgumentException(m("documentsnapshot.0011"));
-                if (k.name() != null && attachments.stream()
-                        .noneMatch(a -> a.slotId().equals(k.slotId()) && a.name().equals(k.name())))
-                    throw new IllegalArgumentException(m("documentsnapshot.0012"));
+                // Runtime attachment keys may name a placeholder absent from every
+                // currently loaded skin. Resolution then hides the slot; retain the
+                // source name so another skin/asset set can supply it later.
             }
             for (var k : clip.discrete().drawOrder())
                 if (k.slots().size() != slots.size() || !new HashSet<>(k.slots()).equals(slotIds))
@@ -227,7 +230,9 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
         for (var c : solving)
             for (var id : c.boneIds()) {
                 var prior = writers.putIfAbsent(id, c);
-                if (prior != null)
+                if (prior != null && !(resources.metadata().orderedConstraintWrites()
+                        && prior instanceof TransformConstraint before && !before.local()
+                        && c instanceof TransformConstraint after && !after.local()))
                     throw new IllegalArgumentException(m("documentsnapshot.0021", byBone.get(id).name(),
                             prior.name(), c.name()));
             }
@@ -260,7 +265,8 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             for (var track : clip.deforms()) {
                 var a = byAttachment.get(track.attachmentId());
                 int size=a instanceof MeshAttachment mesh ? mesh.deformSize()
-                        : a instanceof PathAttachment path ? path.deformSize() : -1;
+                        : a instanceof PathAttachment path ? path.deformSize()
+                        : a instanceof ClippingAttachment clipping ? clipping.deformSize() : -1;
                 if (size < 0)
                     throw new IllegalArgumentException(m("documentsnapshot.0026"));
                 for (var key : track.keys()) {
@@ -453,20 +459,23 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                 if (stage instanceof TransformConstraint tc && !tc.inactive()) {
                     var target = limits.get(tc.targetId());
                     var targetWorld = world.get(tc.targetId());
+                    double mixMagnitude=tc.mix().stream().mapToDouble(Math::abs).max().orElse(0);
+                    double mixGain=tc.mix().stream().anyMatch(v->v<0||v>1)
+                            ? io.github.samlinb.openbone.core.math.Finite.require(Math.pow(1+2*mixMagnitude,6),"transform mix envelope") : 1;
                     if (tc.local())
                         for (var id : tc.boneIds()) {
                             var v = limits.get(id);
                             for (int component : new int[] { 0, 1, 2 })
                                 v[component] = io.github.samlinb.openbone.core.math.Finite.require(
-                                        v[component] + target[component]
-                                                + Math.abs(tc.offset().get(component == 2 ? 0 : component + 1)),
+                                        (v[component] + target[component]
+                                                + Math.abs(tc.offset().get(component == 2 ? 0 : component + 1))) * mixGain,
                                         "local transform animation range");
                             for (int n = 3; n <= 4; n++)
                                 if (tc.mix().get(n) != 0) {
                                     double off = Math.abs(tc.offset().get(n));
                                     v[n] = io.github.samlinb.openbone.core.math.Finite.require(
-                                            tc.relative() ? v[n] * (2 + target[n] + off)
-                                                    : (2 * v[n] + target[n] + off) / 1e-12,
+                                            (tc.relative() ? v[n] * (2 + target[n] + off)
+                                                    : (2 * v[n] + target[n] + off) / 1e-12) * mixGain,
                                             "local constrained scale range");
                                 }
                             shearedLocal.add(id);
@@ -489,7 +498,9 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                             // multiplication; explicitly certify that intermediate as well.
                             io.github.samlinb.openbone.core.math.Finite.require(
                                     (2 * old[0] + targetWorld[0] + scaleOffset) / 1e-12, "world scale factor range");
-                            worldOverrides.put(id, new double[] { norm, position });
+                            worldOverrides.put(id, new double[] {
+                                    io.github.samlinb.openbone.core.math.Finite.require(norm*mixGain,"world transform mix norm"),
+                                    io.github.samlinb.openbone.core.math.Finite.require(position*mixGain,"world transform mix position") });
                         }
                     }
                 }
@@ -539,8 +550,18 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                 }
                 if (a instanceof ClippingAttachment c) {
                     var p = world.get(bySlot.get(c.slotId()).boneId());
-                    for (var v : c.vertices())
-                        positionNormBound(p[0], p[1], v.x(), v.y(), "animation clip vertex bound");
+                    var offsets=DeformTimeline.bounds(clip,c.id(),c.deformSize());int cursor=0;
+                    if(!c.weighted())for (var v : c.vertices())
+                        positionNormBound(p[0], p[1],Math.abs(v.x())+offsets[cursor++],Math.abs(v.y())+offsets[cursor++], "animation clip vertex bound");
+                    else for(var row:c.weights()) {
+                        double sum=0;
+                        for(var influence:row) {
+                            var w=world.get(influence.boneId());
+                            double bound=positionNormBound(w[0],w[1],Math.abs(influence.point().x())+offsets[cursor++],
+                                    Math.abs(influence.point().y())+offsets[cursor++],"clipping influence bound");
+                            sum=io.github.samlinb.openbone.core.math.Finite.require(sum+bound*Math.abs(influence.weight()),"clipping skin sum bound");
+                        }
+                    }
                     continue;
                 }
                 if (a instanceof BoundingBoxAttachment box) {
@@ -688,7 +709,8 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
         Map<EntityId, String> names = new HashMap<>();
         for (var s : slots)
             names.put(s.id(),
-                    s.activeAttachmentId() == null ? null : attachmentsById.get(s.activeAttachmentId()).name());
+                    s.setupAttachmentName()!=null ? s.setupAttachmentName()
+                            : s.activeAttachmentId() == null ? null : attachmentsById.get(s.activeAttachmentId()).name());
         List<EntityId> order = slots.stream().map(Slot::id).toList();
         if (clip != null) {
             var a = animation(clip);

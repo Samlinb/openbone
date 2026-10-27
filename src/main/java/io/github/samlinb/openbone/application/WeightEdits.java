@@ -58,7 +58,7 @@ public final class WeightEdits {
         var inverse = pose.bones().get(slot.boneId()).matrix().inverseOrThrow();
         var vertices = pose.meshes().get(id).vertices().stream().map(p -> inverse.apply(p.x(), p.y())).toList();
         return MeshEdits.replace(d, id, a -> new MeshAttachment(m.id(), m.name(), m.slotId(), m.source(), vertices,
-                m.uvs(), m.hull(), m.triangles()));
+                m.uvs(), m.hull(), m.triangles(),List.of(),m.runtimeTopology(),m.color()));
     }
 
     public static DocumentSnapshot moveWorld(DocumentSnapshot d, EntityId id, int index, Vec2 target) {

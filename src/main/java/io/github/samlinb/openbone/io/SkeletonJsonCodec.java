@@ -135,7 +135,8 @@ public final class SkeletonJsonCodec {
             bySlot.put(s.id(), s);
             var n = slots.addObject().put("name", s.name()).put("bone", d.bone(s.boneId()).name()).put("blend",
                     s.blend().name().toLowerCase(Locale.ROOT));
-            if (s.activeAttachmentId() != null)
+            if(s.setupAttachmentName()!=null)n.put("attachment",s.setupAttachmentName());
+            else if (s.activeAttachmentId() != null)
                 n.put("attachment", attachments.get(s.activeAttachmentId()).name());
             if (!s.color().equals(Rgba.WHITE)) n.put("color",s.color().hex());
         }
@@ -173,9 +174,11 @@ public final class SkeletonJsonCodec {
                             .put("type", "clipping").put("vertexCount", c.vertices().size());
                     n.put("color", c.color().hex());
                     var v = n.putArray("vertices");
-                    for (var p : c.vertices()) {
-                        v.add(p.x());
-                        v.add(p.y());
+                    if(!c.weighted())for (var p : c.vertices()) v.add(p.x()).add(p.y());
+                    else for(var row:c.weights()) {
+                        v.add(row.size());
+                        for(var influence:row)v.add(d.bones().indexOf(d.bone(influence.boneId())))
+                                .add(influence.point().x()).add(influence.point().y()).add(influence.weight());
                     }
                     if (c.endSlotId() != null)
                         n.put("end", bySlot.get(c.endSlotId()).name());
@@ -187,6 +190,7 @@ public final class SkeletonJsonCodec {
                         throw new IOException("Missing packed mesh: " + m.name());
                     var n = skin.withObject("/" + escape(bySlot.get(m.slotId()).name())).putObject(m.name())
                             .put("type", "mesh").put("path", path).put("hull", m.hull());
+                    if(!m.color().equals(Rgba.WHITE))n.put("color",m.color().hex());
                     var vertices = n.putArray("vertices");
                     if (!m.weighted())
                         for (var p : m.vertices()) {
@@ -221,6 +225,7 @@ public final class SkeletonJsonCodec {
                 var n = slot.putObject(r.name()).put("type", "region").put("path", path);
                 putTransform(n, r.local());
                 n.put("width", r.width()).put("height", r.height());
+                if(!r.color().equals(Rgba.WHITE))n.put("color",r.color().hex());
             }
         }
         P8RuntimeJson.definitions(root, d);
@@ -333,6 +338,12 @@ public final class SkeletonJsonCodec {
             var decoded = Spine40Binary.decode(ResourcePaths.bytes(file, ProjectCodec.MAX_BYTES),approval);
             var atlas = AtlasSubset.read(file.toAbsolutePath().normalize(), true, warnings);
             var document = decodeTree(decoded.tree(), imageBase.toAbsolutePath().normalize(), atlas, ImportMode.SPINE_40_BINARY);
+            if(!decoded.importArchive().isEmpty()) {
+                var metadata=document.resources().metadata();
+                document=document.withResources(document.resources().withMetadata(new SpineMetadata(
+                        metadata.text(),metadata.numbers(),metadata.meshes(),decoded.importArchive(),metadata.orderedConstraintWrites())));
+                warnings.add(io.github.samlinb.openbone.i18n.M.m("spineImport.overriddenTracks",decoded.importArchive().size()));
+            }
             sourceVersion = decoded.sourceVersion();
             if(!decoded.selection().known())warnings.add(decoded.selection().message());
             return document;
@@ -478,10 +489,14 @@ public final class SkeletonJsonCodec {
                             int count = ProjectCodec.integer(n.get("vertexCount"), p + ".vertexCount");
                             if (count < 3 || count > io.github.samlinb.openbone.core.math.MeshTopology.MAX_VERTICES)
                                 throw ProjectCodec.bad(p + ".vertexCount", "Expected 3–512 clipping vertices");
-                            var raw = ProjectCodec.array(n, "vertices", p);
-                            if (raw.size() != count * 2)
-                                throw ProjectCodec.bad(p + ".vertices",
-                                        "Weighted clipping is unsupported; expected unweighted XY pairs");
+                            var geometry=pathGeometry(n,p,count,bones,compatibleResources);
+                            var clipVertices=geometry.vertices();
+                            if(!geometry.weights().isEmpty()) {
+                                var reference=new ArrayList<io.github.samlinb.openbone.core.math.Vec2>();
+                                for(int v=0;v<count;v++)reference.add(new io.github.samlinb.openbone.core.math.Vec2(
+                                        Math.cos(v*2*Math.PI/count),Math.sin(v*2*Math.PI/count)));
+                                clipVertices=reference;
+                            }
                             EntityId end = null;
                             if (n.has("end") && !n.get("end").isNull()) {
                                 String endName = ProjectCodec.text(n, "end", p);
@@ -493,8 +508,9 @@ public final class SkeletonJsonCodec {
                             attachmentIds.put(skinName + "\0" + slot + "\0" + name, id);
                             skinEntries.computeIfAbsent(slotIds.get(slot), s -> new LinkedHashMap<>()).put(name, id);
                             attachments.add(new ClippingAttachment(id, name, slotIds.get(slot),
-                                    ProjectCodec.points(n, "vertices", p), end,
-                                    n.has("color") ? Rgba.parse(ProjectCodec.text(n,"color",p)) : ClippingAttachment.DEFAULT_COLOR));
+                                    clipVertices, end,
+                                    n.has("color") ? Rgba.parse(ProjectCodec.text(n,"color",p)) : ClippingAttachment.DEFAULT_COLOR,
+                                    geometry.weights(),compatibleResources || !geometry.weights().isEmpty()));
                             continue;
                         }
                         if (n.path("type").asText().equals("path")) {
@@ -546,13 +562,14 @@ public final class SkeletonJsonCodec {
                                 int a=triangles.get(t+edge),b=triangles.get(t+(edge+1)%3);
                                 forward|=a==0&&b==1;reverse|=a==1&&b==0;
                             }
-                            if(reverse&&!forward) {
+                            if(reverse&&!forward&&!compatibleResources) {
                                 var oriented=new ArrayList<>(triangles);
                                 for(int t=0;t+2<oriented.size();t+=3)Collections.swap(oriented,t+1,t+2);
                                 triangles=List.copyOf(oriented);
                                 warnings.add(io.github.samlinb.openbone.i18n.M.m("spineImport.triangleWinding"));
                             }
                             var raw = ProjectCodec.array(n, "vertices", p);
+                            boolean runtimeTopology=compatibleResources;
                             List<io.github.samlinb.openbone.core.math.Vec2> vertices;
                             List<List<Influence>> weights = new ArrayList<>();
                             if (raw.size() == uvs.size() * 2)
@@ -563,9 +580,9 @@ public final class SkeletonJsonCodec {
                                     if (cursor >= raw.size())
                                         throw ProjectCodec.bad(p + ".vertices", "Missing weighted vertex");
                                     int count = vertexInteger(raw.get(cursor++), p + ".vertices.count");
-                                    if (count < 1 || count > 4 || cursor + count * 4 > raw.size())
+                                    if (count < 1 || count > bones.size() || count > (raw.size() - cursor) / 4)
                                         throw ProjectCodec.bad(p + ".vertices",
-                                                "Each vertex requires 1–4 complete influences");
+                                                "Each vertex requires complete influences with distinct valid bones");
                                     List<Influence> row = new ArrayList<>();
                                     for (int j = 0; j < count; j++) {
                                         int bi = vertexInteger(raw.get(cursor++), p + ".vertices.boneIndex");
@@ -594,13 +611,28 @@ public final class SkeletonJsonCodec {
                                 }
                                 if (cursor != raw.size())
                                     throw ProjectCodec.bad(p + ".vertices", "Trailing weighted vertex data");
-                                vertices = io.github.samlinb.openbone.core.math.MeshTopology.certificate(uvs.size(),
-                                        ProjectCodec.integer(n.get("hull"), p + ".hull"),
-                                        triangles);
+                                if(compatibleResources)vertices=List.copyOf(uvs);
+                                else try {
+                                    vertices = io.github.samlinb.openbone.core.math.MeshTopology.certificate(uvs.size(),
+                                            ProjectCodec.integer(n.get("hull"), p + ".hull"),triangles);
+                                } catch(IllegalArgumentException topology) {
+                                    if(!compatibleResources)throw topology;
+                                    // Weighted source positions live in influences. UVs are only an editor
+                                    // placeholder for count/selection; they never supply rendered positions.
+                                    vertices=List.copyOf(uvs);
+                                    runtimeTopology=true;
+                                }
+                            }
+                            if(!runtimeTopology)try {
+                                io.github.samlinb.openbone.core.math.MeshTopology.validate(vertices,
+                                        ProjectCodec.integer(n.get("hull"),p+".hull"),triangles);
+                            } catch(IllegalArgumentException topology) {
+                                if(!compatibleResources)throw topology;
+                                runtimeTopology=true;
                             }
                             attachments.add(new MeshAttachment(id, name, slotIds.get(slot), png.toString(), vertices,
                                     uvs, ProjectCodec.integer(n.get("hull"), p + ".hull"),
-                                    triangles, weights));
+                                    triangles, weights,runtimeTopology,n.has("color")?Rgba.parse(ProjectCodec.text(n,"color",p)):Rgba.WHITE));
                             continue;
                         }
                         attachments.add(new RegionAttachment(id, name, slotIds.get(slot), png.toString(),
@@ -610,7 +642,8 @@ public final class SkeletonJsonCodec {
                                                 : pixels == null ? 1 : pixels.getWidth(),
                                         p),
                                 num(n, "height", atlasMetadata.containsKey(id) ? atlasMetadata.get(id).originalHeight()
-                                        : pixels == null ? 1 : pixels.getHeight(), p)));
+                                        : pixels == null ? 1 : pixels.getHeight(), p),
+                                n.has("color")?Rgba.parse(ProjectCodec.text(n,"color",p)):Rgba.WHITE));
                     }
                 }
                 importedSkins.add(new Skin(skinName, skinEntries));
@@ -627,9 +660,9 @@ public final class SkeletonJsonCodec {
                             if (id != null)
                                 break;
                         }
-                    if (id == null)
+                    if (id == null && !compatibleResources)
                         throw ProjectCodec.bad("$.slots.attachment", "Unknown active attachment " + name);
-                    slots.set(si, s.withActiveAttachment(id));
+                    slots.set(si, s.withActiveAttachment(id).withSetupAttachmentName(id==null?name:null));
                 }
                 si++;
             }
@@ -695,10 +728,11 @@ public final class SkeletonJsonCodec {
                                     var target = attachments.stream().filter(a -> a.id().equals(aid)).findFirst()
                                             .orElseThrow();
                                     int size=target instanceof MeshAttachment mesh?mesh.deformSize()
-                                            :target instanceof PathAttachment pathAttachment?pathAttachment.deformSize():-1;
+                                            :target instanceof PathAttachment pathAttachment?pathAttachment.deformSize()
+                                            :target instanceof ClippingAttachment clipping?clipping.deformSize():-1;
                                     if (size<0)
                                         throw ProjectCodec.bad("$.animations.attachments.deform",
-                                                "Only mesh and path deform supported");
+                                                "Only mesh, path and clipping deform supported");
                                     if (attachmentEntry.getValue().has("deform"))
                                         deforms.add(new DeformTimeline(aid, readDeformKeys(
                                                 attachmentEntry.getValue().get("deform"), size)));
@@ -802,9 +836,19 @@ public final class SkeletonJsonCodec {
             }
             animations = ConstraintTimelineJson.read(root, animations, constraints);
             var activation = SkinActivationJson.readRuntime(root, bones, constraints);
+            var importedMetadata=SpineMetadataJson.readRuntime(root,attachmentIds);
+            if(compatibleResources) {
+                var worldWriters=new HashSet<EntityId>();boolean overlap=false;
+                for(var constraint:constraints)if(constraint instanceof TransformConstraint transform && !transform.local())
+                    for(var id:transform.boneIds())if(!worldWriters.add(id))overlap=true;
+                if(overlap) {
+                    importedMetadata=importedMetadata.withOrderedConstraintWrites(true);
+                    warnings.add(io.github.samlinb.openbone.i18n.M.m("spineImport.orderedConstraints"));
+                }
+            }
             var d = new DocumentSnapshot(bones, slots, attachments, animations, constraints,
                     new Resources(importedSkins.size() == 1 && importedSkins.get(0).name().equals("default") && activation.equals(SkinActivation.EMPTY) ? List.of()
-                            : importedSkins, "default", eventDefinitions, atlasMetadata, SpineMetadataJson.readRuntime(root, attachmentIds), activation));
+                            : importedSkins, "default", eventDefinitions, atlasMetadata, importedMetadata, activation));
             // Runtime export certificates must not delete valid editable source data.
             if (mode == ImportMode.STRICT_42 && !ProjectCodec.needsSkinActivation(d)) RuntimeRange.validate(d);
             return d;
@@ -952,8 +996,8 @@ public final class SkeletonJsonCodec {
         for(int vertex=0;vertex<count;vertex++) {
             if(cursor>=raw.size())throw ProjectCodec.bad(path+".vertices","Missing weighted path vertex");
             int influences=vertexInteger(raw.get(cursor++),path+".vertices.count");
-            if(influences<1||influences>4||cursor+influences*4>raw.size())
-                throw ProjectCodec.bad(path+".vertices","Each path vertex requires 1–4 complete influences");
+            if(influences<1||influences>bones.size()||influences>(raw.size()-cursor)/4)
+                throw ProjectCodec.bad(path+".vertices","Each path vertex requires complete influences with distinct valid bones");
             var row=new ArrayList<Influence>();
             for(int i=0;i<influences;i++) {
                 int bone=vertexInteger(raw.get(cursor++),path+".vertices.boneIndex");
@@ -1111,7 +1155,7 @@ public final class SkeletonJsonCodec {
             double startTime=num(key,"time",0,"key"),endTime=num(next,"time",0,"key");
             if(endTime<=startTime)throw ProjectCodec.bad("key.time","Keys must be strictly increasing");
             var times=new TreeSet<Double>();times.add(startTime);
-            double[][] xs=new double[dimensions][11],ys=new double[dimensions][11];
+            var points=new ArrayList<SpineBezierChords.Points>();
             for(int c=0;c<dimensions;c++) {
                 String field=dimensions==1?"value":c==0?"x":"y";
                 double start=num(key,field,fallback,"key"),end=num(next,field,fallback,"key");
@@ -1121,22 +1165,13 @@ public final class SkeletonJsonCodec {
                     if(!value.isNumber())throw ProjectCodec.bad("key.curve","Expected finite control number");
                     controls[n]=RuntimeRange.number(value.doubleValue(),"Bezier control");
                 }
-                if(controls[0]<startTime||controls[0]>endTime||controls[2]<startTime||controls[2]>endTime)
-                    throw ProjectCodec.bad("key.curve","Bezier time controls must lie within the segment");
-                xs[c][0]=startTime;ys[c][0]=start;xs[c][10]=endTime;ys[c][10]=end;
-                for(int step=1;step<10;step++) {
-                    double u=step/10.,v=1-u;
-                    xs[c][step]=v*v*v*startTime+3*v*v*u*controls[0]+3*v*u*u*controls[2]+u*u*u*endTime;
-                    ys[c][step]=v*v*v*start+3*v*v*u*controls[1]+3*v*u*u*controls[3]+u*u*u*end;
-                    times.add(xs[c][step]);
-                }
+                var component=SpineBezierChords.points(startTime,endTime,start,end,controls);
+                points.add(component);SpineBezierChords.times(times,component,false);
             }
             for(double time:times) {
                 var sample=output.addObject().put("time",time);
                 for(int c=0;c<dimensions;c++) {
-                    int step=1;while(step<10&&time>xs[c][step])step++;
-                    double alpha=(time-xs[c][step-1])/(xs[c][step]-xs[c][step-1]);
-                    sample.put(dimensions==1?"value":c==0?"x":"y",ys[c][step-1]+alpha*(ys[c][step]-ys[c][step-1]));
+                    sample.put(dimensions==1?"value":c==0?"x":"y",SpineBezierChords.sample(points.get(c),time));
                 }
             }
             warnings.add(io.github.samlinb.openbone.i18n.M.m("spineImport.flatBezier"));
@@ -1264,7 +1299,7 @@ public final class SkeletonJsonCodec {
                                 "height", "color");
                     if (n.has("type") && !Set.of("region", "mesh", "clipping", "path", "boundingbox").contains(n.get("type").asText()))
                         errors.add(q + ".type (only region/mesh/clipping/path/boundingbox)");
-                    if (n.has("color") && !Set.of("clipping","boundingbox").contains(n.path("type").asText()) && !n.get("color").asText().equalsIgnoreCase("ffffffff"))
+                    if (n.has("color") && n.path("type").asText().equals("path") && !n.get("color").asText().equalsIgnoreCase("ffffffff"))
                         errors.add(q + ".color (only white)");
                 }
             }

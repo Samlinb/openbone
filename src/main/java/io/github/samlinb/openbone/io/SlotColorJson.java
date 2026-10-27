@@ -41,6 +41,10 @@ final class SlotColorJson {
                     var value = values(n,channel); var curves = new ArrayList<Curve>();
                     var curve = n.get("curve");
                     if (curve != null && i+1==array.size()) throw bad("color key.curve","Last key has no outgoing curve");
+                    if (curve!=null&&curve.isArray()&&needsFlatExpansion(value,values(array.get(i+1),channel),curve)) {
+                        expandFlatColor(keys,n,array.get(i+1),channel,curve);
+                        continue;
+                    }
                     for (int c=0;c<channel.components();c++) {
                         Curve parsed = Curve.LINEAR;
                         if (curve != null) {
@@ -69,6 +73,34 @@ final class SlotColorJson {
             }
         }
         return tracks;
+    }
+    private static boolean needsFlatExpansion(List<Double> start,List<Double> end,JsonNode curve) {
+        if(curve.size()!=start.size()*4)return false;
+        for(int c=0;c<start.size();c++)
+            if(start.get(c).equals(end.get(c))&&(curve.path(c*4+1).asDouble()!=start.get(c)||curve.path(c*4+3).asDouble()!=start.get(c)))return true;
+        return false;
+    }
+    private static void expandFlatColor(List<Keyframe> keys,JsonNode current,JsonNode next,
+            SlotColorTimeline.Channel channel,JsonNode curve)throws ProjectFormatException {
+        double start=current.path("time").asDouble(),end=next.path("time").asDouble();
+        if(end<=start)throw bad("color key.time","Keys must increase");
+        var from=values(current,channel);var to=values(next,channel);
+        var times=new TreeSet<Double>();var points=new ArrayList<SpineBezierChords.Points>();
+        for(int c=0;c<channel.components();c++) {
+            double[] controls=new double[4];
+            for(int j=0;j<4;j++) {
+                var raw=curve.get(c*4+j);
+                if(!raw.isNumber())throw bad("color key.curve","Expected numeric controls");
+                controls[j]=RuntimeRange.number(raw.doubleValue(),"color curve");
+            }
+            var component=SpineBezierChords.points(start,end,from.get(c),to.get(c),controls);
+            points.add(component);SpineBezierChords.times(times,component,true);
+        }
+        for(double time:times) {
+            var value=new ArrayList<Double>();
+            for(var component:points)value.add(Rgba.clamp(SpineBezierChords.sample(component,time)));
+            keys.add(new Keyframe(EntityId.create(),time,value,Collections.nCopies(channel.components(),Curve.LINEAR)));
+        }
     }
     static void write(ObjectNode animation, DocumentSnapshot d, List<SlotColorTimeline> tracks) throws ProjectFormatException {
         for(var t:tracks) {

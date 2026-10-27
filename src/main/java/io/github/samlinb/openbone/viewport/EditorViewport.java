@@ -131,7 +131,10 @@ public final class EditorViewport extends ApplicationAdapter {
         var config = new LwjglApplicationConfiguration();
         config.forceExit = false;
         config.foregroundFPS = 120;
-        config.backgroundFPS = 20;
+        // Explicit batch-capture instances may render faster while another app has
+        // focus. Keep the interactive default and bound the opt-in frame budget.
+        config.backgroundFPS = Math.max(1, Math.min(240,
+                Integer.getInteger("openbone.viewport.backgroundFPS", 20)));
         config.vSyncEnabled = false;
         backend = new LwjglAWTCanvas(this, config) {
             @Override
@@ -215,6 +218,12 @@ public final class EditorViewport extends ApplicationAdapter {
 
     public Camera2D camera() {
         return camera;
+    }
+
+    /** Fit explicit world bounds without imposing the wheel's minimum zoom. */
+    public void frameBounds(double minX,double minY,double maxX,double maxY,double occupancy) {
+        requireEdt();
+        camera.fit(minX,minY,maxX,maxY,Math.max(1,canvas.getWidth()),Math.max(1,canvas.getHeight()),occupancy);
     }
 
     public Tool tool() {

@@ -748,6 +748,11 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                     validate();
                     viewport.displayOptions(options.showBones(),options.showGrid());
                     if(options.fit())frameCurrentPose();
+                    if(options.fitAnimation())frameAnimationRange(clip);
+                    if(options.framingBounds()!=null) {
+                        var bounds=options.framingBounds();
+                        frameGeometryPoints(List.of(new Vec2(bounds.minX(),bounds.minY()),new Vec2(bounds.maxX(),bounds.maxY())),.70);
+                    }
                 });
                 var result = raw.thenApply(image -> {
                     var pose = evaluatedPose();
@@ -1240,7 +1245,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             propertyButton(m("editorframe.0052"), this::createPhysicsConstraint);
         } else if (s != null) {
             field("name", m("editorframe.0096"), s.name(), value -> edit(m("editorframe.0102"), d -> ModelEdits
-                    .editSlot(d, id, v -> new Slot(v.id(), value, v.boneId(), v.activeAttachmentId(), v.blend(),v.color()))));
+                    .editSlot(d, id, v -> new Slot(v.id(), value, v.boneId(), v.activeAttachmentId(), v.blend(),v.color(),v.setupAttachmentName()))));
             JComboBox<Choice> bones = boneChoices(false, s.boneId());
             bones.setName("property.binding");
             named.put(bones.getName(), bones);
@@ -1250,7 +1255,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                     return;
                 var target = ((Choice) bones.getSelectedItem()).id();
                 guard(() -> edit(m("editorframe.0104"), d -> ModelEdits.editSlot(d, id,
-                        v -> new Slot(v.id(), v.name(), target, v.activeAttachmentId(), v.blend(),v.color()))));
+                        v -> new Slot(v.id(), v.name(), target, v.activeAttachmentId(), v.blend(),v.color(),v.setupAttachmentName()))));
             });
             JComboBox<Choice> active = new JComboBox<>();
             active.addItem(new Choice(null, m("editorframe.0105")));
@@ -1277,17 +1282,17 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             field("name", m("editorframe.0096"), r.name(),
                     value -> edit(m("editorframe.0114"),
                             d -> ModelEdits.editRegion(d, id, v -> new RegionAttachment(v.id(), value, v.slotId(),
-                                    v.source(), v.local(), v.width(), v.height()))));
+                                    v.source(), v.local(), v.width(), v.height(),v.color()))));
             transformFields(id);
             field("width", m("editorframe.0115"), number(r.width()), value -> {
                 double v = parse(value);
                 edit(m("editorframe.0116"), d -> ModelEdits.editRegion(d, id,
-                        a -> new RegionAttachment(a.id(), a.name(), a.slotId(), a.source(), a.local(), v, a.height())));
+                        a -> new RegionAttachment(a.id(), a.name(), a.slotId(), a.source(), a.local(), v, a.height(),a.color())));
             });
             field("height", m("editorframe.0117"), number(r.height()), value -> {
                 double v = parse(value);
                 edit(m("editorframe.0118"), d -> ModelEdits.editRegion(d, id,
-                        a -> new RegionAttachment(a.id(), a.name(), a.slotId(), a.source(), a.local(), a.width(), v)));
+                        a -> new RegionAttachment(a.id(), a.name(), a.slotId(), a.source(), a.local(), a.width(), v,a.color())));
             });
             text(assets.get(r.source()).missing() ? m("editorframe.0119") : m("editorframe.0120"));
             JTextArea source = new JTextArea(r.source());
@@ -1907,8 +1912,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         EntityId id = c.id();
         title(m("editorframe.0222"));
         field("name", m("editorframe.0096"), c.name(), value -> edit(m("editorframe.0223"), d -> ClippingEdits.edit(d,
-                id, a -> new ClippingAttachment(a.id(), value, a.slotId(), a.vertices(), a.endSlotId(), a.color()))));
-        field("clip.color", m("attachment.color"), c.color().hex(), value -> edit(m("attachment.color"), d -> ClippingEdits.edit(d, id, a -> new ClippingAttachment(a.id(), a.name(), a.slotId(), a.vertices(), a.endSlotId(), Rgba.parse(value)))));
+                id, a -> new ClippingAttachment(a.id(), value, a.slotId(), a.vertices(), a.endSlotId(), a.color(),a.weights(),a.runtimeTopology()))));
+        field("clip.color", m("attachment.color"), c.color().hex(), value -> edit(m("attachment.color"), d -> ClippingEdits.edit(d, id, a -> new ClippingAttachment(a.id(), a.name(), a.slotId(), a.vertices(), a.endSlotId(), Rgba.parse(value),a.weights(),a.runtimeTopology()))));
         text(m("editorframe.0224"));
         var ends = new JComboBox<Choice>();
         ends.addItem(new Choice(null, m("editorframe.0225")));
@@ -1934,7 +1939,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                 return;
             boolean focused = ends.isFocusOwner();
             guard(() -> edit(m("editorframe.0227"), d -> ClippingEdits.edit(d, id,
-                    a -> new ClippingAttachment(a.id(), a.name(), a.slotId(), a.vertices(), end, a.color()))));
+                    a -> new ClippingAttachment(a.id(), a.name(), a.slotId(), a.vertices(), end, a.color(),a.weights(),a.runtimeTopology()))));
             if (focused && named.containsKey("property.clip.end"))
                 named.get("property.clip.end").requestFocusInWindow();
         };
@@ -2094,7 +2099,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         title(m("editorframe.0243"));
         field("name", m("editorframe.0096"), m.name(),
                 value -> edit(m("editorframe.0244"), d -> MeshEdits.replace(d, id, a -> new MeshAttachment(m.id(),
-                        value, m.slotId(), m.source(), m.vertices(), m.uvs(), m.hull(), m.triangles(), m.weights()))));
+                        value, m.slotId(), m.source(), m.vertices(), m.uvs(), m.hull(), m.triangles(), m.weights(),m.runtimeTopology(),m.color()))));
         text(m("editorframe.0245") + m.hull() + m("editorframe.0246") + (m.vertices().size() - m.hull())
                 + m("editorframe.0247") + m.triangles().size() / 3);
         propertyButton(viewport.meshEditing() ? m("editorframe.0159") : m("editorframe.0160"),
@@ -2141,7 +2146,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         List<JTextField[]> values = new ArrayList<>();
         var old = m.weighted() ? m.weights().get(vertex) : List.<Influence>of();
         var owner = slot(m.slotId()).boneId();
-        for (int row = 0; row < 4; row++) {
+        int influenceRows = Math.max(4, old.size());
+        for (int row = 0; row < influenceRows; row++) {
             Influence i = row < old.size() ? old.get(row) : null;
             var choice = boneChoices(true, i != null ? i.boneId() : row == 0 ? owner : null);
             choice.setName("weight.bone." + row);
@@ -2168,7 +2174,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         guard(() -> {
             List<WeightEdits.Binding> bindings = new ArrayList<>();
             List<Influence> influences = new ArrayList<>();
-            for (int row = 0; row < 4; row++) {
+            for (int row = 0; row < influenceRows; row++) {
                 var bone = ((Choice) bones.get(row).getSelectedItem()).id();
                 if (bone == null)
                     continue;
@@ -2895,12 +2901,30 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         var points=new ArrayList<Vec2>(VisibleGeometry.evaluate(displayModel(),pose).stream().filter(d->d.color().a()>0).flatMap(d->d.geometry().vertices().stream()).toList());
         if(points.isEmpty())for(var bone:pose.bones().values()) {points.add(bone.origin());points.add(bone.tip());}
         if(points.isEmpty()) {viewport.camera().reset();return;}
+        frameGeometryPoints(points);
+    }
+
+    /** One camera for the animation's sampled visible extent, retaining root motion. */
+    private void frameAnimationRange(EntityId clip) {
+        var document=model();double duration=document.animation(clip).duration();
+        var points=new ArrayList<Vec2>();
+        for(double time:new double[]{0,duration*.25,duration*.5,duration*.75,duration,animation.time()}) {
+            var pose=AnimationSampler.world(document,clip,time,false);
+            VisibleGeometry.evaluate(document,pose).stream().filter(draw->draw.color().a()>0)
+                    .flatMap(draw->draw.geometry().vertices().stream()).forEach(points::add);
+        }
+        if(points.isEmpty()){frameCurrentPose();return;}
+        frameGeometryPoints(points);
+    }
+
+    private void frameGeometryPoints(List<Vec2> points) {
+        frameGeometryPoints(points,.85);
+    }
+
+    private void frameGeometryPoints(List<Vec2> points,double occupancy) {
         double minX=points.stream().mapToDouble(Vec2::x).min().orElse(0),maxX=points.stream().mapToDouble(Vec2::x).max().orElse(0);
         double minY=points.stream().mapToDouble(Vec2::y).min().orElse(0),maxY=points.stream().mapToDouble(Vec2::y).max().orElse(0);
-        int width=Math.max(1,viewport.canvas().getWidth()),height=Math.max(1,viewport.canvas().getHeight());
-        double zoom=Math.min(width*.85/Math.max(1,maxX-minX),height*.85/Math.max(1,maxY-minY));
-        var camera=viewport.camera();camera.reset();camera.zoomAt(zoom,width/2.,height/2.,width,height);
-        camera.pan(-(minX/2+maxX/2)*camera.zoom(),(minY/2+maxY/2)*camera.zoom());
+        viewport.frameBounds(minX,minY,maxX,maxY,occupancy);
     }
 
     private void resetAssets() {

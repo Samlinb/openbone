@@ -196,6 +196,13 @@ public final class RuntimeRange {
                 continue;
             }
             if (a instanceof ClippingAttachment c) {
+                if(c.weighted()) {
+                    for(var row:c.weights())for(var influence:row) {
+                        number(influence.point().x(),"clipping influence x");number(influence.point().y(),"clipping influence y");
+                        number(influence.weight(),"clipping influence weight");
+                    }
+                    continue;
+                }
                 List<io.github.samlinb.openbone.core.math.Vec2> transmitted = new ArrayList<>();
                 for (var v : c.vertices()) {
                     number(v.x(), "clipping.local.x");
@@ -203,7 +210,8 @@ public final class RuntimeRange {
                     transmitted.add(new io.github.samlinb.openbone.core.math.Vec2((float) v.x(), (float) v.y()));
                 }
                 try {
-                    io.github.samlinb.openbone.core.math.MeshTopology.boundary(transmitted, transmitted.size());
+                    if(c.runtimeTopology())io.github.samlinb.openbone.core.math.MeshTopology.triangulateRuntimePolygon(transmitted);
+                    else io.github.samlinb.openbone.core.math.MeshTopology.boundary(transmitted, transmitted.size());
                 } catch (IllegalArgumentException invalid) {
                     throw ProjectCodec.bad("clipping " + c.name(),
                             "Topology collapses in float32: " + invalid.getMessage());
@@ -235,7 +243,8 @@ public final class RuntimeRange {
                     number(uv.y(), "mesh.uv.v");
                 }
                 try {
-                    io.github.samlinb.openbone.core.math.MeshTopology.validate(transmitted, m.hull(), m.triangles());
+                    if(m.runtimeTopology())io.github.samlinb.openbone.core.math.MeshTopology.validateRuntime(transmitted,m.hull(),m.triangles());
+                    else io.github.samlinb.openbone.core.math.MeshTopology.validate(transmitted, m.hull(), m.triangles());
                 } catch (IllegalArgumentException invalid) {
                     throw ProjectCodec.bad("mesh " + m.name(),
                             "Topology collapses/changes in float32: " + invalid.getMessage());

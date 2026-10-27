@@ -235,6 +235,12 @@ The current implementation strictly accepts the supported subset, including chec
 
 Project saving and runtime export use different validation scopes. Check that there is exactly one root bone, that PNGs are readable, and that constraints, animations and numeric values meet the export limits.
 
+**How do playback events behave when changing Loop or restarting?**
+
+Changing Loop during playback settles pending events with the previous setting, then continues from the displayed animation time. Disabling Loop after several cycles finishes the current cycle. A seek is silent; play at or beyond the end restarts at zero. Desktop and MCP playback share these event rules, including firing the zero-time event once on restart.
+
+To reproduce the former backwards-interval error, play a clip through several loops and turn Loop off, or call `openbone_control_view` with `action: "play"` and `time` equal to the clip duration. Use the current `expectedRevision`, the clip's `animationId`, and a unique `requestId`; identical retries keep the existing receipt semantics. Playback must continue without an error or duplicate events and leave model/history unchanged. Run `mvn -Dtest=AnimationPlaybackTest,AnimationTest,P8ModelTest test` for deterministic event-order and transport regressions.
+
 ## Third-Party Notices
 
 See [pom.xml](pom.xml) for dependency declarations, and [THIRD_PARTY.txt](src/main/resources/THIRD_PARTY.txt) and [licenses](src/main/resources/licenses/) for third-party licenses and notices. The Spine name is used to describe the workflow reference and the data-format compatibility target.

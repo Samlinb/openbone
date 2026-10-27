@@ -4,10 +4,20 @@ import java.util.*;
 import io.github.samlinb.openbone.core.math.Finite;
 
 /** Source export information, independent of evaluated geometry and image packing. */
-public record SpineMetadata(Map<String, String> text, Map<String, Double> numbers, Map<EntityId, Mesh> meshes) {
+public record SpineMetadata(Map<String, String> text, Map<String, Double> numbers, Map<EntityId, Mesh> meshes,
+        Map<String,String> importArchive, boolean orderedConstraintWrites) {
+    public SpineMetadata(Map<String,String> text,Map<String,Double> numbers,Map<EntityId,Mesh> meshes,
+            Map<String,String> importArchive) {
+        this(text,numbers,meshes,importArchive,false);
+    }
+    public SpineMetadata(Map<String,String> text,Map<String,Double> numbers,Map<EntityId,Mesh> meshes) {
+        this(text,numbers,meshes,Map.of());
+    }
     public static final SpineMetadata EMPTY = new SpineMetadata(Map.of(), Map.of(), Map.of());
     public SpineMetadata {
-        text = Map.copyOf(text); numbers = Map.copyOf(numbers); meshes = Map.copyOf(meshes);
+        text = Map.copyOf(text); numbers = Map.copyOf(numbers); meshes = Map.copyOf(meshes);importArchive=Map.copyOf(importArchive);
+        if(importArchive.size()>10000||importArchive.entrySet().stream().anyMatch(e->e.getKey().length()>4096||e.getValue().length()>1_000_000))
+            throw new IllegalArgumentException("Import archive exceeds supported limits");
         if (!Set.of("hash", "audio").containsAll(text.keySet())
                 || !Set.of("x", "y", "width", "height", "fps").containsAll(numbers.keySet()))
             throw new IllegalArgumentException("Unknown skeleton metadata field");
@@ -40,13 +50,17 @@ public record SpineMetadata(Map<String, String> text, Map<String, Double> number
 
     public SpineMetadata retain(Set<EntityId> removed) {
         var next = new HashMap<>(meshes); next.keySet().removeAll(removed);
-        return new SpineMetadata(text, numbers, next);
+        return new SpineMetadata(text, numbers, next, importArchive,orderedConstraintWrites);
     }
 
     public SpineMetadata withoutEdges(EntityId id) {
         if (!meshes.containsKey(id)) return this;
         var next = new HashMap<>(meshes); var old = next.get(id);
         next.put(id, new Mesh(null, old.width(), old.height()));
-        return new SpineMetadata(text, numbers, next);
+        return new SpineMetadata(text, numbers, next, importArchive,orderedConstraintWrites);
+    }
+
+    public SpineMetadata withOrderedConstraintWrites(boolean value) {
+        return new SpineMetadata(text,numbers,meshes,importArchive,value);
     }
 }

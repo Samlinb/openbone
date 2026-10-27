@@ -80,6 +80,7 @@ public final class DeformEdits {
         var attachment=document.attachment(id);
         if(attachment instanceof MeshAttachment mesh)return mesh.deformSize();
         if(attachment instanceof PathAttachment path)return path.deformSize();
+        if(attachment instanceof ClippingAttachment clipping)return clipping.deformSize();
         throw new IllegalArgumentException(m("documentsnapshot.0026"));
     }
 }

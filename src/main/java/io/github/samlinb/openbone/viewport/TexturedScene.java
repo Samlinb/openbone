@@ -10,7 +10,8 @@ import io.github.samlinb.openbone.core.model.Slot;
 /**
  * Shared textured draw path for the editor and render verification. Caller owns
  * GL/EDT
- * and the batch projection/lifetime. PNG texels stay straight-alpha sRGB bytes.
+ * and the batch projection/lifetime. PNG bytes are never unpremultiplied: atlas
+ * PMA metadata selects blending and alpha-premultiplied vertex tint.
  */
 public final class TexturedScene {
     private TexturedScene() {
@@ -23,11 +24,14 @@ public final class TexturedScene {
         try {
             for (var draw : draws) {
                 int destination = draw.blend() == Slot.Blend.ADDITIVE ? GL20.GL_ONE : GL20.GL_ONE_MINUS_SRC_ALPHA;
-                batch.setBlendFunctionSeparate(GL20.GL_SRC_ALPHA, destination, GL20.GL_ONE, destination);
+                batch.setBlendFunctionSeparate(draw.premultiplied() ? GL20.GL_ONE : GL20.GL_SRC_ALPHA,
+                        destination, GL20.GL_ONE, destination);
                 var image = texture.apply(draw.source());
                 var geometry = draw.geometry();
                 var color=draw.color();
-                float packedColor=Color.toFloatBits((float)color.r(),(float)color.g(),(float)color.b(),(float)color.a());
+                double tintAlpha = draw.premultiplied() ? color.a() : 1;
+                float packedColor=Color.toFloatBits((float)(color.r()*tintAlpha),(float)(color.g()*tintAlpha),
+                        (float)(color.b()*tintAlpha),(float)color.a());
                 for (int start = 0; start < geometry.triangles().size(); start += 1800) {
                     int count = Math.min(1800, geometry.triangles().size() - start);
                     float[] data = new float[count * 5];

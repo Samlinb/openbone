@@ -11,14 +11,20 @@ import static io.github.samlinb.openbone.i18n.M.m;
  * serialization.
  */
 public record MeshAttachment(EntityId id, String name, EntityId slotId, String source,
-        List<Vec2> vertices, List<Vec2> uvs, int hull, List<Integer> triangles, List<List<Influence>> weights)
+        List<Vec2> vertices, List<Vec2> uvs, int hull, List<Integer> triangles, List<List<Influence>> weights,
+        boolean runtimeTopology, Rgba color)
         implements Attachment {
+    public MeshAttachment(EntityId id, String name, EntityId slotId, String source,
+            List<Vec2> vertices, List<Vec2> uvs, int hull, List<Integer> triangles, List<List<Influence>> weights) {
+        this(id,name,slotId,source,vertices,uvs,hull,triangles,weights,false,Rgba.WHITE);
+    }
     public MeshAttachment(EntityId id, String name, EntityId slotId, String source, List<Vec2> vertices, List<Vec2> uvs,
             int hull, List<Integer> triangles) {
         this(id, name, slotId, source, vertices, uvs, hull, triangles, List.of());
     }
 
     public MeshAttachment {
+        Objects.requireNonNull(color,"attachment.color");
         Objects.requireNonNull(id);
         Names.require(name);
         Objects.requireNonNull(slotId);
@@ -36,7 +42,8 @@ public record MeshAttachment(EntityId id, String name, EntityId slotId, String s
         for (var uv : uvs)
             if (uv.x() < 0 || uv.x() > 1 || uv.y() < 0 || uv.y() > 1)
                 throw new IllegalArgumentException(m("meshattachment.0003"));
-        MeshTopology.validate(vertices, hull, triangles);
+        if(runtimeTopology) MeshTopology.validateRuntime(vertices,hull,triangles);
+        else MeshTopology.validate(vertices, hull, triangles);
     }
 
     public boolean weighted() {
@@ -48,10 +55,10 @@ public record MeshAttachment(EntityId id, String name, EntityId slotId, String s
     }
 
     public MeshAttachment withSource(String value) {
-        return new MeshAttachment(id, name, slotId, value, vertices, uvs, hull, triangles, weights);
+        return new MeshAttachment(id, name, slotId, value, vertices, uvs, hull, triangles, weights,runtimeTopology,color);
     }
 
     public MeshAttachment withWeights(List<List<Influence>> value) {
-        return new MeshAttachment(id, name, slotId, source, vertices, uvs, hull, triangles, value);
+        return new MeshAttachment(id, name, slotId, source, vertices, uvs, hull, triangles, value,runtimeTopology,color);
     }
 }

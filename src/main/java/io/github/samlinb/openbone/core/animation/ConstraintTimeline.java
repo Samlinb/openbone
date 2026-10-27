@@ -92,6 +92,7 @@ public record ConstraintTimeline(EntityId constraintId, ConstraintChannel channe
                 for (var r : range)
                     values.add(
                             t.channel == ConstraintChannel.PATH_POSITION || t.channel == ConstraintChannel.PATH_SPACING
+                                    || t.channel == ConstraintChannel.TRANSFORM_MIX
                                     ? Math.max(Math.abs(r[0]), Math.abs(r[1]))
                                     : r[1]);
                 result = t.channel.apply(result, values);

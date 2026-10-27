@@ -14,7 +14,7 @@ import javax.imageio.ImageIO;
 import javax.swing.SwingUtilities;
 
 /** MCP's domain boundary. All editor state access, including reads, runs on EDT. */
-public final class EditorMcpTools {
+public final class EditorMcpTools implements AutoCloseable {
     public interface Host {
         CommandHistory history();
         Map<String, Object> context();
@@ -26,7 +26,11 @@ public final class EditorMcpTools {
         default void installProject(ProjectDocument document) { throw new UnsupportedOperationException("Project loading is unavailable for this host"); }
         default void control(ViewControl control) { throw new UnsupportedOperationException("View control is unavailable for this host"); }
     }
-    public record CaptureOptions(boolean fit, Boolean showBones, Boolean showGrid) {}
+    public record CaptureOptions(boolean fit, Boolean showBones, Boolean showGrid, boolean fitAnimation,
+            io.github.samlinb.openbone.viewport.AnimationFraming.Bounds framingBounds) {
+        public CaptureOptions(boolean fit,Boolean showBones,Boolean showGrid,boolean fitAnimation){this(fit,showBones,showGrid,fitAnimation,null);}
+        public CaptureOptions(boolean fit,Boolean showBones,Boolean showGrid){this(fit,showBones,showGrid,false);}
+    }
     public record ViewControl(String action, EntityId animation, Double time, Boolean loop, Boolean showBones, Boolean showGrid) {}
     public record Preview(BufferedImage image, Map<String, Object> metadata) {}
     private record Receipt(JsonNode arguments, ObjectNode result) {}
@@ -39,6 +43,7 @@ public final class EditorMcpTools {
         return new ObjectMapper().registerModule(module);
     }
     private final Host host;
+    private final AnimationMediaService media = new AnimationMediaService();
     // Bounded, process-local retry receipts. Reusing an ID with different arguments is rejected.
     private final Map<String, Receipt> receipts = new LinkedHashMap<>();
 
@@ -74,6 +79,15 @@ public final class EditorMcpTools {
         add(tools,"openbone_export_spine","Export a snapshot of the current project as a portable Spine package. format JSON/BINARY uses independently implemented 3.8,4.0,4.1,4.2,4.3 schemas. NATIVE creates a real .spine via a separately configured licensed Spine CLI; it is not an OpenBone project renamed to .spine. Version-incompatible features fail before publication. Files publish atomically through current.json; no live model/history changes. Read context for expectedRevision and retry identical arguments with the same requestId.",schema("""
             {"directory":{"type":"string"},"version":{"type":"string"},"format":{"enum":["JSON","BINARY","NATIVE"]},"expectedRevision":{"type":"string"},"requestId":{"type":"string"}}
             ""","directory","version","format","expectedRevision","requestId"),false);
+        add(tools,"openbone_render_animation",io.github.samlinb.openbone.i18n.M.m("media.renderDescription"),schema("""
+            {"directory":{"type":"string"},"animationId":{"type":"string"},"fps":{"type":"integer","minimum":1,"maximum":60},"fit":{"type":"boolean"},"fitTime":{"type":"number","minimum":0,"maximum":600},"expectedRevision":{"type":"string"},"requestId":{"type":"string","minLength":1,"maxLength":128}}
+            ""","directory","animationId","expectedRevision","requestId"),false);
+        add(tools,"openbone_render_status",io.github.samlinb.openbone.i18n.M.m("media.statusDescription"),schema("""
+            {"jobId":{"type":"string"},"waitMs":{"type":"integer","minimum":0,"maximum":5000}}
+            ""","jobId"),true);
+        add(tools,"openbone_cancel_render",io.github.samlinb.openbone.i18n.M.m("media.cancelDescription"),schema("""
+            {"jobId":{"type":"string"}}
+            ""","jobId"),false);
         return tools;
     }
 
@@ -119,6 +133,8 @@ public final class EditorMcpTools {
     public synchronized ObjectNode call(String name, JsonNode args) {
         if (SwingUtilities.isEventDispatchThread()) throw new IllegalStateException("MCP calls must run off EDT");
         try {
+            if(media.busy()&&!Set.of("openbone_get_context","openbone_query_scene","openbone_render_status","openbone_cancel_render","openbone_render_animation").contains(name))
+                throw new IllegalStateException(io.github.samlinb.openbone.i18n.M.m("media.busy"));
             ObjectNode result;
             switch (name) {
                 case "openbone_get_context" -> {
@@ -127,6 +143,12 @@ public final class EditorMcpTools {
                 }
                 case "openbone_query_scene" -> result = success(onEdt(() -> query(args)));
                 case "openbone_capture_preview" -> result = capture(args);
+                case "openbone_render_animation" -> result = renderAnimation(args);
+                case "openbone_render_status" -> {
+                    fields(args,"jobId","waitMs");
+                    result=success(media.status(text(args,"jobId",128),integer(args,"waitMs",0,0,5000)));
+                }
+                case "openbone_cancel_render" -> {fields(args,"jobId");result=success(media.cancel(text(args,"jobId",128)));}
                 case "openbone_apply_edits", "openbone_undo", "openbone_redo" -> result = mutate(name, args);
                 case "openbone_control_view", "openbone_save_project", "openbone_load_project", "openbone_export_spine" -> result = serviceOperation(name,args);
                 default -> throw new IllegalArgumentException("Unknown tool: " + name + ". Call tools/list.");
@@ -157,11 +179,12 @@ public final class EditorMcpTools {
         data.put("revision", h.revision());
         data.put("version",io.github.samlinb.openbone.EditorApplication.version());
         data.put("mcpApiVersion",2);
-        data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",true,"cleanPreview",true,"atomicEdits",true,"nonBoneKeyframeQuery",true,"nonBoneKeyframeEdits",true));
+        data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",true,"cleanPreview",true,"atomicEdits",true,"nonBoneKeyframeQuery",true,"nonBoneKeyframeEdits",true,"animationMedia",true));
         data.put("spineIO",Map.of("versions",io.github.samlinb.openbone.io.SpineVersion.exportVersions(),"formats",List.of("JSON","BINARY","NATIVE"),"nativeCliConfigured",io.github.samlinb.openbone.io.SpineCliBridge.configured()));
         data.put("dirty", h.isDirty());
         data.put("activeSkin", d.resources().activeSkin());
-        data.put("busy", h.isPreviewing());
+        data.put("busy", h.isPreviewing()||media.busy());
+        data.put("mediaBusy",media.busy());
         data.put("selection", h.state().selection().ids().stream().map(EntityId::value).toList());
         data.put("selectedKeyIds", h.state().keySelection().stream().map(EntityId::value).toList());
         data.put("counts", Map.of("bones", d.bones().size(), "animations", d.animations().size(), "slots", d.slots().size(), "attachments", d.attachments().size(), "constraints", d.constraints().size()));
@@ -237,9 +260,23 @@ public final class EditorMcpTools {
             }
             case "skins" -> {
                 total = d.skins().size();
+                Map<EntityId,String> setupNames=new HashMap<>();
+                Map<EntityId,Attachment> byAttachment=new HashMap<>();
+                d.attachments().forEach(attachment->byAttachment.put(attachment.id(),attachment));
+                for(var slot:d.slots()) {
+                    String setupName=slot.setupAttachmentName();
+                    if(setupName==null && slot.activeAttachmentId()!=null)
+                        setupName=byAttachment.get(slot.activeAttachmentId()).name();
+                    if(setupName!=null)setupNames.put(slot.id(),setupName);
+                }
+                var defaultSkin=d.skins().stream().filter(s->s.name().equals("default")).findFirst();
                 rows = d.skins().stream().map(s -> {
                     var members = d.resources().activation().skins().getOrDefault(s.name(), SkinActivation.Members.EMPTY);
                     var row = JSON.createObjectNode().put("name", s.name()).put("active", s.name().equals(d.resources().activeSkin()));
+                    row.put("attachmentCount",s.attachments().values().stream().mapToInt(Map::size).sum());
+                    row.put("setupAttachmentMatches",setupNames.entrySet().stream().filter(entry->
+                            s.find(entry.getKey(),entry.getValue())!=null || defaultSkin.map(fallback->
+                                    fallback.find(entry.getKey(),entry.getValue())!=null).orElse(false)).count());
                     row.set("boneIds", JSON.valueToTree(members.bones().stream().map(EntityId::value).sorted().toList()));
                     row.set("constraintIds", JSON.valueToTree(members.constraints().stream().map(EntityId::value).sorted().toList()));
                     return row;
@@ -362,6 +399,41 @@ public final class EditorMcpTools {
         ((ArrayNode) result.get("content")).addObject().put("type", "image").put("mimeType", "image/png").put("data", Base64.getEncoder().encodeToString(bytes.toByteArray()));
         return result;
     }
+
+    private ObjectNode renderAnimation(JsonNode a) throws Exception {
+        fields(a,"directory","animationId","fps","fit","fitTime","expectedRevision","requestId");
+        String key="openbone_render_animation:"+text(a,"requestId",128);
+        Receipt receipt=receipts.get(key);
+        if(receipt!=null){if(!receipt.arguments().equals(a))throw new IllegalArgumentException("requestId already used with different arguments");return receipt.result().deepCopy();}
+        if(media.busy())throw new IllegalStateException(io.github.samlinb.openbone.i18n.M.m("media.busy"));
+        String revision=text(a,"expectedRevision",128);EntityId animation=id(a,"animationId");
+        int fps=integer(a,"fps",24,1,60);boolean fit=SceneMcpEdits.bool(a,"fit",true);
+        Path directory=SceneMcpEdits.absolutePath(a,"directory");
+        DocumentSnapshot snapshot=onEdt(()->{host.prepare();checkRevision(revision);return host.history().state().model();});
+        double duration=snapshot.animation(animation).duration();
+        double fitTime=a.has("fitTime")?number(a.get("fitTime"),"fitTime",0,duration):duration*.5;
+        var request=new AnimationMediaService.Request(text(a,"requestId",128),revision,animation,directory,fps,duration,fit,fitTime);
+        var source=new AnimationMediaService.Source(){
+            public String fitStrategy(){return "Fixed camera framed once with 70% viewport occupancy: complete encoded-frame times for up to 256 frames, otherwise 256 uniform samples plus bounded source-key extrema and attachment transitions; CPU bounds evaluated off EDT";}
+            public void checkRevision(String expected)throws Exception{
+                onEdt(()->{host.prepare();EditorMcpTools.this.checkRevision(expected);return null;});
+            }
+            public CompletableFuture<AnimationMediaService.Frame> capture(EntityId clip,double time,String expected,boolean frame)throws Exception{
+                // The snapshot is immutable: potentially expensive bounds evaluation
+                // belongs to the media worker, never the Swing event thread.
+                var bounds=frame?io.github.samlinb.openbone.viewport.AnimationFraming.sample(snapshot,clip,fps,time):null;
+                var captured=onEdt(()->{host.prepare();EditorMcpTools.this.checkRevision(expected);return host.capture(clip,time,expected,new CaptureOptions(false,false,false,frame&&bounds==null,bounds));});
+                var mapped=captured.thenApply(p->new AnimationMediaService.Frame(p.image(),p.metadata()));
+                mapped.whenComplete((value,failed)->{if(mapped.isCancelled())captured.cancel(false);});
+                return mapped;
+            }
+        };
+        ObjectNode result=success(media.start(request,source));receipts.put(key,new Receipt(a.deepCopy(),result.deepCopy()));
+        if(receipts.size()>128)receipts.remove(receipts.keySet().iterator().next());
+        return result;
+    }
+
+    @Override public void close(){media.close();}
 
     public static ObjectNode success(Object data) {
         var structured = JSON.createObjectNode(); structured.set("data", JSON.valueToTree(data));

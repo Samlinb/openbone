@@ -8,8 +8,13 @@ import io.github.samlinb.openbone.core.math.*;
  * resource reference, not loaded here.
  */
 public record RegionAttachment(EntityId id, String name, EntityId slotId, String source,
-        Transform local, double width, double height) implements Attachment {
+        Transform local, double width, double height, Rgba color) implements Attachment {
+    public RegionAttachment(EntityId id, String name, EntityId slotId, String source,
+            Transform local, double width, double height) {
+        this(id,name,slotId,source,local,width,height,Rgba.WHITE);
+    }
     public RegionAttachment {
+        Objects.requireNonNull(color,"attachment.color");
         Objects.requireNonNull(id, "attachment.id");
         Names.require(name);
         Objects.requireNonNull(slotId, "attachment.slotId");

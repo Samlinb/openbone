@@ -1,6 +1,7 @@
 package io.github.samlinb.openbone.viewport;
 
 import io.github.samlinb.openbone.core.math.*;
+import static io.github.samlinb.openbone.i18n.M.m;
 
 /**
  * Coordinates are AWT logical pixels. Device scale belongs only to the GL
@@ -44,6 +45,21 @@ public final class Camera2D {
         zoom = next;
         x = nx;
         y = ny;
+    }
+
+    /** Explicit framing may zoom farther out than interactive wheel zoom. */
+    public void fit(double minX,double minY,double maxX,double maxY,int width,int height,double occupancy) {
+        for(double value:new double[]{minX,minY,maxX,maxY,occupancy})Finite.require(value,"camera bounds");
+        if(minX>maxX||minY>maxY||width<1||height<1||occupancy<=0||occupancy>1)
+            throw new IllegalArgumentException(m("camera.invalidFitBounds"));
+        // Half extents avoid max-min overflow for finite, widely separated points.
+        double cx=minX/2+maxX/2,cy=minY/2+maxY/2;
+        double halfWidth=Math.max(.5,Math.max(Math.abs(minX-cx),Math.abs(maxX-cx)));
+        double halfHeight=Math.max(.5,Math.max(Math.abs(minY-cy),Math.abs(maxY-cy)));
+        double fitted=Math.min((width*.5*occupancy)/halfWidth,(height*.5*occupancy)/halfHeight);
+        Finite.require(fitted,"camera fit zoom");
+        if(fitted<=0)throw new IllegalArgumentException(m("camera.fitTooSmall"));
+        x=cx;y=cy;zoom=Math.min(20,fitted);
     }
 
     public void pan(double dx, double dy) {

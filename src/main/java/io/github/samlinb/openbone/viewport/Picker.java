@@ -44,7 +44,7 @@ public final class Picker {
                 int a = g.triangles().get(t), b = g.triangles().get(t + 1), c = g.triangles().get(t + 2);
                 var uv = triangleUv(world, g.vertices().get(a), g.vertices().get(b), g.vertices().get(c),
                         g.uvs().get(a), g.uvs().get(b), g.uvs().get(c));
-                if (uv.isPresent() && opaque(image, uv.get(),draw.color().a()))
+                if (uv.isPresent() && opaque(image, uv.get(),draw.color(),draw.premultiplied()))
                     return Optional.of(draw.attachmentId());
             }
         }
@@ -63,9 +63,13 @@ public final class Picker {
      * GDX textures use ClampToEdge. A legal UV of exactly 1 samples the last texel,
      * including when an interior mesh point has constant boundary UVs.
      */
-    private static boolean opaque(java.awt.image.BufferedImage image, Vec2 uv, double alpha) {
-        return (image.getRGB(Math.min(image.getWidth() - 1, (int) Math.floor(uv.x() * image.getWidth())),
-                Math.min(image.getHeight() - 1, (int) Math.floor(uv.y() * image.getHeight()))) >>> 24) * alpha > 16;
+    private static boolean opaque(java.awt.image.BufferedImage image, Vec2 uv, Rgba color, boolean premultiplied) {
+        int pixel=image.getRGB(Math.min(image.getWidth() - 1, (int) Math.floor(uv.x() * image.getWidth())),
+                Math.min(image.getHeight() - 1, (int) Math.floor(uv.y() * image.getHeight())));
+        if ((pixel >>> 24) * color.a() > 16) return true;
+        // PMA can encode visible emission in RGB even when the texture alpha is zero.
+        return premultiplied && Math.max(((pixel >>> 16) & 255)*color.r(),
+                Math.max(((pixel >>> 8) & 255)*color.g(),(pixel & 255)*color.b()))*color.a()>16;
     }
 
     /**

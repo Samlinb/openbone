@@ -177,7 +177,7 @@ final class ResourceDialog extends JDialog {
             var id = slot().id();
             var value = (Slot.Blend) blend.getSelectedItem();
             edit(m("resourcedialog.0021"), d -> ModelEdits.editSlot(d, id,
-                    s -> new Slot(s.id(), s.name(), s.boneId(), s.activeAttachmentId(), value,s.color())));
+                    s -> new Slot(s.id(), s.name(), s.boneId(), s.activeAttachmentId(), value,s.color(),s.setupAttachmentName())));
         });
         panel.add(actions, BorderLayout.SOUTH);
         panel.add(new JLabel(m("resourcedialog.0022")));

@@ -57,32 +57,39 @@ final class AtlasSubset {
                 Path path = page.textureFile.file().toPath().toAbsolutePath().normalize();
                 ResourcePaths.contained(atlas.getParent(),
                         atlas.getParent().toAbsolutePath().normalize().relativize(path).toString().replace('\\', '/'));
-                if (page.pma || page.format != com.badlogic.gdx.graphics.Pixmap.Format.RGBA8888
+                if (page.format != com.badlogic.gdx.graphics.Pixmap.Format.RGBA8888
                         || page.minFilter != TextureFilter.Nearest || page.magFilter != TextureFilter.Nearest
                         || page.uWrap != TextureWrap.ClampToEdge || page.vWrap != TextureWrap.ClampToEdge)
                     throw new IOException(
-                            "Unsupported atlas format/PMA/filter/repeat; requires RGBA8888, straight alpha, Nearest, no repeat");
+                            io.github.samlinb.openbone.i18n.M.m("atlas.unsupportedPageSettings"));
                 if (legacy && !Files.exists(path)) {
                     warnings.add("atlas: missing page; region metadata retained: " + path);
                     continue;
                 }
                 var pixels = io.github.samlinb.openbone.viewport.ImageAssets.decodePng(
                         legacy ? RuntimePng.readCompatible(path) : RuntimePng.read(path));
-                if (page.width != pixels.getWidth() || page.height != pixels.getHeight())
-                    throw new IOException("Atlas page dimensions mismatch");
+                if (page.width != pixels.getWidth() || page.height != pixels.getHeight()) {
+                    if (!legacy) throw new IOException("Atlas page dimensions mismatch");
+                    // UVs are normalized in the declared atlas coordinate space. Platform
+                    // texture downscaling changes texel dimensions, not those UV ratios.
+                    warnings.add(io.github.samlinb.openbone.i18n.M.m("atlas.platformDimensions", path,
+                            (int)page.width, (int)page.height, pixels.getWidth(), pixels.getHeight()));
+                    if (pixels.getWidth()==1 && pixels.getHeight()==1)
+                        warnings.add(io.github.samlinb.openbone.i18n.M.m("atlas.placeholderPage", path));
+                }
             }
             for (var r : data.getRegions()) {
-                if (r.degrees != 0 && r.degrees != 90 || r.index != -1 || r.flip || r.names != null)
+                if (r.degrees != 0 && r.degrees != 90 && r.degrees != 180 && r.degrees != 270 || r.index != -1 || r.flip || r.names != null)
                     throw new IOException("Unsupported atlas rotation/index/custom fields: " + r.name);
                 io.github.samlinb.openbone.core.model.AtlasRegion metadata;
                 try {
                     metadata = new io.github.samlinb.openbone.core.model.AtlasRegion((int) r.page.width,
                             (int) r.page.height, r.left, r.top, r.width, r.height, r.originalWidth, r.originalHeight,
-                            (int) r.offsetX, (int) r.offsetY, r.degrees == 90);
+                            (int) r.offsetX, (int) r.offsetY, r.degrees == 90 || r.degrees == 270, r.page.pma, r.degrees);
                 } catch (IllegalArgumentException invalid) {
                     throw new IOException("Invalid atlas region: " + r.name, invalid);
                 }
-                boolean full = !metadata.rotated() && metadata.x() == 0 && metadata.y() == 0 && metadata.offsetX() == 0
+                boolean full = !metadata.premultiplied() && metadata.degrees() == 0 && metadata.x() == 0 && metadata.y() == 0 && metadata.offsetX() == 0
                         && metadata.offsetY() == 0 && metadata.width() == metadata.pageWidth()
                         && metadata.height() == metadata.pageHeight() && metadata.width() == metadata.originalWidth()
                         && metadata.height() == metadata.originalHeight();
@@ -100,7 +107,7 @@ final class AtlasSubset {
         }
     }
 
-    private static final Map<String, Integer> PAGE = Map.of("size", 2, "format", 1, "filter", 2, "repeat", 1, "pma", 1);
+    private static final Map<String, Integer> PAGE = Map.of("size", 2, "format", 1, "filter", 2, "repeat", 1, "pma", 1, "scale", 1);
     private static final Map<String, Integer> REGION = Map.of("rotate", 1, "xy", 2, "size", 2, "orig", 2, "offset", 2,
             "index", 1, "bounds", 4, "offsets", 4);
 
@@ -203,7 +210,19 @@ final class AtlasSubset {
                     throw bad(filename, entry.line(), path, "Empty atlas value");
             }
             String key = entry.key();
-            if (scope.page && Set.of("format", "filter", "repeat", "pma").contains(key)) {
+            if (scope.page && key.equals("scale")) {
+                // Spine's atlas reader consumes but does not apply this packer hint.
+                // Packed region coordinates already include the texture packer's scale.
+                try {
+                    double scale = Double.parseDouble(values[0]);
+                    if (!Double.isFinite(scale) || scale <= 0) throw new NumberFormatException();
+                } catch (NumberFormatException invalid) {
+                    throw bad(filename, entry.line(), path, io.github.samlinb.openbone.i18n.M.m("atlas.scaleFinitePositive"));
+                }
+            } else if (scope.page && key.equals("pma")) {
+                if (!values[0].equals("true") && !values[0].equals("false"))
+                    throw bad(filename, entry.line(), path, io.github.samlinb.openbone.i18n.M.m("atlas.pmaBoolean"));
+            } else if (scope.page && Set.of("format", "filter", "repeat").contains(key)) {
                 String required = switch (key) {
                     case "format" -> "RGBA8888";
                     case "filter" -> "Nearest";
@@ -220,7 +239,7 @@ final class AtlasSubset {
                         continue;
                     try {
                         int parsed = Integer.parseInt(value);
-                        if (key.equals("rotate") && parsed != 0 && parsed != 90 || key.equals("index") && parsed != -1)
+                        if (key.equals("rotate") && parsed != 0 && parsed != 90 && parsed != 180 && parsed != 270 || key.equals("index") && parsed != -1)
                             throw bad(filename, entry.line(), path, "Unsupported atlas value: " + value);
                     } catch (NumberFormatException e) {
                         throw bad(filename, entry.line(), path, "Invalid atlas integer: " + value);

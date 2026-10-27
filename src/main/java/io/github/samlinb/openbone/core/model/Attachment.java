@@ -7,4 +7,6 @@ public sealed interface Attachment permits RegionAttachment, MeshAttachment, Cli
     EntityId slotId();
     /** Non-textured attachment kinds have no resource source. */
     default String source(){return null;}
+    /** Textured attachments multiply this tint by the evaluated slot color. */
+    default Rgba color(){return Rgba.WHITE;}
 }

@@ -5,6 +5,7 @@ import java.awt.event.*;
 import java.util.*;
 import java.util.List;
 import java.util.function.UnaryOperator;
+import java.util.function.LongSupplier;
 import javax.swing.*;
 import io.github.samlinb.openbone.application.*;
 import io.github.samlinb.openbone.core.animation.*;
@@ -39,6 +40,7 @@ final class AnimationPanel extends JPanel {
 
     private final Host host;
     private final Playback clock = new Playback();
+    private final LongSupplier nanoTime;
 
     private record ClipChoice(EntityId id, String name) {
         public String toString() {
@@ -98,8 +100,13 @@ final class AnimationPanel extends JPanel {
     private AnimationEdits.Clipboard clipboard;
 
     AnimationPanel(Host host) {
+        this(host, System::nanoTime);
+    }
+
+    AnimationPanel(Host host, LongSupplier nanoTime) {
         super(new BorderLayout());
         this.host = host;
+        this.nanoTime = nanoTime;
         var top = new JPanel(new WorkspaceFlowLayout(FlowLayout.LEFT, 6, 3));
         mode.setName("animation.mode");
         register(mode);
@@ -159,17 +166,9 @@ final class AnimationPanel extends JPanel {
             if (!prepare())
                 return;
             if (clock.playing()) {
-                clock.pause(System.nanoTime(), duration());
-                emitEvents(false);
+                pausePlayback();
             } else {
-                if (clock.time() >= duration())
-                    zeroEmitted = false;
-                clock.play(System.nanoTime(), duration());
-                eventCursor = clock.absoluteTime();
-                boolean initial = clock.time() == 0 && !zeroEmitted;
-                emitEvents(initial);
-                if (clock.time() == 0)
-                    zeroEmitted = true;
+                startPlayback();
             }
             host.changed();
         }));
@@ -178,7 +177,8 @@ final class AnimationPanel extends JPanel {
         loop.addActionListener(e -> {
             if (!prepare())
                 return;
-            clock.loop(loop.isSelected());
+            setLooping(loop.isSelected());
+            host.changed();
         });
         transport.add(new JLabel(m("animationpanel.0013")));
         register(time, "animation.time");
@@ -238,7 +238,7 @@ final class AnimationPanel extends JPanel {
                 return;
             }
             cancel();
-            clock.pause(System.nanoTime(), duration());
+            clock.pause(nanoTime.getAsLong(), duration());
             animate = next;
             body.setVisible(animate);
             revalidate();
@@ -248,7 +248,7 @@ final class AnimationPanel extends JPanel {
             if (!clock.playing())
                 return;
             guard(() -> {
-                clock.tick(System.nanoTime(), duration());
+                clock.tick(nanoTime.getAsLong(), duration());
                 emitEvents(false);
                 refresh();
                 host.poseChanged();
@@ -384,6 +384,9 @@ final class AnimationPanel extends JPanel {
     private DocumentSnapshot rowsModel;
     private EntityId rowsClip;
     private List<TrackRow> cachedRows;
+    private DocumentSnapshot durationModel;
+    private EntityId durationClip;
+    private double cachedDuration;
 
     private List<TrackRow> rows() {
         EntityId clip = active();
@@ -425,7 +428,13 @@ final class AnimationPanel extends JPanel {
     }
 
     double duration() {
-        return PhysicsPlayer.duration(model(), active());
+        var current=model();
+        // Timeline painting maps each key through span()/x(). Immutable model
+        // identity and clip selection make that shared duration lookup constant-time.
+        if(durationModel==current&&Objects.equals(durationClip,active))return cachedDuration;
+        EntityId clip=active();double result=PhysicsPlayer.duration(current,clip);
+        durationModel=current;durationClip=clip;cachedDuration=result;
+        return result;
     }
 
     boolean animate() {
@@ -457,10 +466,41 @@ final class AnimationPanel extends JPanel {
         EntityId target=clip==null?active():clip;
         if(seconds!=null||action.equals("play")||action.equals("seek"))
             remoteSeek(target,seconds==null?clock.time():seconds);
-        if(looping!=null) {clock.loop(looping);loop.setSelected(looping);}
-        if(action.equals("play"))clock.play(System.nanoTime(),duration());
-        if(action.equals("pause"))clock.pause(System.nanoTime(),duration());
+        if(looping!=null) setLooping(looping);
+        if(action.equals("play"))startPlayback();
+        if(action.equals("pause"))pausePlayback();
         host.changed();
+    }
+
+    private void startPlayback() {
+        if (clock.time() >= duration())
+            zeroEmitted = false;
+        clock.play(nanoTime.getAsLong(), duration());
+        // play may restart at zero or discard completed loop cycles.
+        eventCursor = clock.absoluteTime();
+        emitEvents(clock.time() == 0 && !zeroEmitted);
+        if (clock.time() == 0)
+            zeroEmitted = true;
+    }
+
+    private void pausePlayback() {
+        clock.pause(nanoTime.getAsLong(), duration());
+        emitEvents(false);
+    }
+
+    private void setLooping(boolean value) {
+        if (clock.loop() != value) {
+            boolean resume = clock.playing();
+            if (resume)
+                pausePlayback();
+            clock.loop(value);
+            if (resume) {
+                // Re-anchor at the displayed time, settling the old interval first.
+                clock.play(nanoTime.getAsLong(), duration());
+                eventCursor = clock.absoluteTime();
+            }
+        }
+        loop.setSelected(value);
     }
 
     Map<EntityId, Transform> pose() {
@@ -486,7 +526,7 @@ final class AnimationPanel extends JPanel {
         if (!host.commitFields())
             return false;
         if (clock.playing()) {
-            clock.pause(System.nanoTime(), duration());
+            clock.pause(nanoTime.getAsLong(), duration());
             host.changed();
         }
         return true;
@@ -644,7 +684,7 @@ final class AnimationPanel extends JPanel {
         var bone = host.selectedBone();
         if (bone == null)
             throw new IllegalArgumentException(m("animationpanel.0033"));
-        clock.pause(System.nanoTime(), duration());
+        clock.pause(nanoTime.getAsLong(), duration());
         var t = display().bone(bone.id()).local();
         mutate(m("animationpanel.0034"), d -> AnimationEdits.record(d, active(), bone.id(), clock.time(), t, channels));
     }
@@ -662,7 +702,7 @@ final class AnimationPanel extends JPanel {
             throw new IllegalArgumentException(m("animationpanel.0032"));
         if (!prepare())
             return;
-        clock.pause(System.nanoTime(), duration());
+        clock.pause(nanoTime.getAsLong(), duration());
         host.history().execute(name, Commands.model(d -> operation.apply(withActiveDefault(d))));
         host.changed();
     }
@@ -672,7 +712,7 @@ final class AnimationPanel extends JPanel {
             throw new IllegalArgumentException(m("animationpanel.0032"));
         if (!prepare())
             return;
-        clock.pause(System.nanoTime(), duration());
+        clock.pause(nanoTime.getAsLong(), duration());
         host.history().execute(m("animationpanel.0035"), state -> {
             var d = state.model();
             Set<EntityId> old = new HashSet<>();

@@ -43,6 +43,7 @@ public final class Playback {
         if (duration <= 0) {
             playing = false;
             time = 0;
+            absoluteTime = 0;
             return;
         }
         if (time >= duration)

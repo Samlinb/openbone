@@ -16,7 +16,17 @@ import io.github.samlinb.openbone.core.animation.*;
  */
 public final class ProjectCodec {
     public static final int SCHEMA_VERSION = 2;
-    public static final int MAX_BYTES = 16 * 1024 * 1024;
+    /** Default remains 16 MiB; explicit bulk-import sessions may raise the bounded limit. */
+    public static final int MAX_BYTES = configuredMaxBytes();
+    static int configuredMaxBytes() {
+        String configured=System.getProperty("openbone.project.maxBytes");
+        if(configured==null)return 16*1024*1024;
+        try {
+            int limit=Integer.parseInt(configured);
+            if(limit<1024 || limit>512*1024*1024)throw new IllegalArgumentException("Project byte limit must be 1024–536870912");
+            return limit;
+        } catch(NumberFormatException invalid) {throw new IllegalArgumentException("Invalid openbone.project.maxBytes",invalid);}
+    }
     private final ObjectMapper mapper = new ObjectMapper(JsonFactory.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .streamReadConstraints(StreamReadConstraints.builder().maxNestingDepth(128).maxStringLength(1_000_000)
@@ -38,7 +48,7 @@ public final class ProjectCodec {
                 throw bad("$.schemaVersion", "Missing required field");
             JsonNode version = root.get("schemaVersion");
             if (!version.isIntegralNumber() || !version.canConvertToInt() || version.intValue() < 1
-                    || version.intValue() > 12)
+                    || version.intValue() > 14)
                 throw bad("$.schemaVersion", "Unsupported schema version: " + version);
             if (version.intValue() == 1)
                 fields(root, "$", "schemaVersion", "bones", "slots", "attachments");
@@ -65,7 +75,9 @@ public final class ProjectCodec {
             index = 0;
             for (JsonNode n : array(root, "slots", "$")) {
                 String p = "$.slots[" + index++ + "]";
-                if (version.intValue() >= 7)
+                if (version.intValue() >= 13)
+                    fields(n, p, "id", "name", "boneId", "activeAttachmentId", "blend", "color", "setupAttachmentName");
+                else if (version.intValue() >= 7)
                     fields(n, p, "id", "name", "boneId", "activeAttachmentId", "blend", "color");
                 else if (version.intValue() >= 6)
                     fields(n, p, "id", "name", "boneId", "activeAttachmentId", "blend");
@@ -74,7 +86,8 @@ public final class ProjectCodec {
                 slots.add(new Slot(id(n, "id", p), text(n, "name", p), id(n, "boneId", p),
                         nullableId(n, "activeAttachmentId", p),
                         version.intValue() >= 6 ? Slot.Blend.valueOf(text(n, "blend", p)) : Slot.Blend.NORMAL,
-                        version.intValue() >= 7 ? P8ProjectJson.readColor(n,p) : Rgba.WHITE));
+                        version.intValue() >= 7 ? P8ProjectJson.readColor(n,p) : Rgba.WHITE,
+                        version.intValue() >= 13 && !n.path("setupAttachmentName").isNull() ? text(n,"setupAttachmentName",p) : null));
             }
             index = 0;
             for (JsonNode n : array(root, "attachments", "$")) {
@@ -88,10 +101,12 @@ public final class ProjectCodec {
                     continue;
                 }
                 if (text(n, "type", p).equals("clipping") && version.intValue() >= 3) {
-                    if (version.intValue() >= 10) fields(n, p, "type", "id", "name", "slotId", "vertices", "endSlotId", "color");
+                    if(version.intValue()>=13)fields(n,p,"type","id","name","slotId","vertices","endSlotId","color","weights","runtimeTopology");
+                    else if (version.intValue() >= 10) fields(n, p, "type", "id", "name", "slotId", "vertices", "endSlotId", "color");
                     else fields(n, p, "type", "id", "name", "slotId", "vertices", "endSlotId");
                     attachments.add(new ClippingAttachment(id(n, "id", p), text(n, "name", p), id(n, "slotId", p),
-                            points(n, "vertices", p), nullableId(n, "endSlotId", p), n.has("color") ? Rgba.parse(text(n,"color",p)) : ClippingAttachment.DEFAULT_COLOR));
+                            points(n, "vertices", p), nullableId(n, "endSlotId", p), n.has("color") ? Rgba.parse(text(n,"color",p)) : ClippingAttachment.DEFAULT_COLOR,
+                            version.intValue()>=13?readPathWeights(n,p):List.of(),version.intValue()>=13&&bool(n,"runtimeTopology",p)));
                     continue;
                 }
                 if (text(n, "type", p).equals("boundingbox") && version.intValue() >= 10) {
@@ -100,7 +115,10 @@ public final class ProjectCodec {
                     continue;
                 }
                 if (text(n, "type", p).equals("mesh") && version.intValue() >= 3) {
-                    if (n.has("weights"))
+                    if(version.intValue()>=13) {
+                        if(n.has("weights"))fields(n,p,"type","id","name","slotId","source","vertices","uvs","hull","triangles","weights","runtimeTopology","color");
+                        else fields(n,p,"type","id","name","slotId","source","vertices","uvs","hull","triangles","runtimeTopology","color");
+                    } else if (n.has("weights"))
                         fields(n, p, "type", "id", "name", "slotId", "source", "vertices", "uvs", "hull", "triangles",
                                 "weights");
                     else
@@ -121,15 +139,19 @@ public final class ProjectCodec {
                         }
                     attachments.add(new MeshAttachment(id(n, "id", p), text(n, "name", p), id(n, "slotId", p),
                             text(n, "source", p), points(n, "vertices", p), points(n, "uvs", p),
-                            integer(n.get("hull"), p + ".hull"), integers(n, "triangles", p), weights));
+                            integer(n.get("hull"), p + ".hull"), integers(n, "triangles", p), weights,
+                            version.intValue()>=13 && bool(n,"runtimeTopology",p),
+                            version.intValue()>=13 ? Rgba.parse(text(n,"color",p)) : Rgba.WHITE));
                     continue;
                 }
-                fields(n, p, "type", "id", "name", "slotId", "source", "local", "width", "height");
+                if(version.intValue()>=13)fields(n, p, "type", "id", "name", "slotId", "source", "local", "width", "height","color");
+                else fields(n, p, "type", "id", "name", "slotId", "source", "local", "width", "height");
                 if (!text(n, "type", p).equals("region"))
                     throw bad(p + ".type", "Unsupported attachment type");
                 attachments.add(new RegionAttachment(id(n, "id", p), text(n, "name", p), id(n, "slotId", p),
                         text(n, "source", p),
-                        transform(n.get("local"), p + ".local"), number(n, "width", p), number(n, "height", p)));
+                        transform(n.get("local"), p + ".local"), number(n, "width", p), number(n, "height", p),
+                        version.intValue()>=13 ? Rgba.parse(text(n,"color",p)) : Rgba.WHITE));
             }
             if (version.intValue() == 1)
                 return new DocumentSnapshot(bones, slots, attachments);
@@ -354,7 +376,12 @@ public final class ProjectCodec {
     public byte[] encode(DocumentSnapshot model) throws IOException {
         Objects.requireNonNull(model, "model");
         ObjectNode root = mapper.createObjectNode();
-        root.put("schemaVersion", needsSkinActivation(model) ? 12 : needsPathGeometry(model) ? 11 : needsExtendedAnimation(model) ? 10 : !model.resources().metadata().equals(SpineMetadata.EMPTY) ? 9
+        boolean sourceGeometry=model.attachments().stream().anyMatch(a -> a instanceof MeshAttachment mesh && mesh.runtimeTopology()
+                || (a instanceof MeshAttachment || a instanceof RegionAttachment) && !a.color().equals(Rgba.WHITE))
+                || model.attachments().stream().anyMatch(a->a instanceof ClippingAttachment c && (c.weighted() || c.runtimeTopology()))
+                || model.slots().stream().anyMatch(s->s.setupAttachmentName()!=null)
+                || model.resources().atlas().values().stream().anyMatch(a->a.premultiplied() || a.degrees()!=0 && a.degrees()!=90);
+        root.put("schemaVersion", model.resources().metadata().orderedConstraintWrites() ? 14 : sourceGeometry ? 13 : needsSkinActivation(model) ? 12 : needsPathGeometry(model) ? 11 : needsExtendedAnimation(model) ? 10 : !model.resources().metadata().equals(SpineMetadata.EMPTY) ? 9
                 : model.bones().stream().anyMatch(b -> !b.color().equals(Rgba.WHITE) || b.inherit() != Bone.Inherit.normal) ? 8
                 : model.slots().stream().anyMatch(s -> !s.color().equals(Rgba.WHITE))
                 || model.animations().stream().anyMatch(a -> !a.discrete().colors().isEmpty()) ? 7 : P8ProjectJson.needed(model) ? 6
@@ -390,6 +417,10 @@ public final class ProjectCodec {
             if (root.path("schemaVersion").asInt() >= 6)
                 n.put("blend", s.blend().name());
             if (root.path("schemaVersion").asInt() >= 7) s.color().values().forEach(n.putArray("color")::add);
+            if (root.path("schemaVersion").asInt() >= 13) {
+                if(s.setupAttachmentName()==null)n.putNull("setupAttachmentName");
+                else n.put("setupAttachmentName",s.setupAttachmentName());
+            }
         }
         for (Attachment a : model.attachments()) {
             if (a instanceof BoundingBoxAttachment box) {
@@ -404,7 +435,7 @@ public final class ProjectCodec {
                         .put("constantSpeed", path.constantSpeed());
                 putPoints(n.putArray("vertices"), path.vertices());
                 path.lengths().forEach(n.putArray("lengths")::add);
-                if(path.weighted()) {
+                if(path.weighted() || root.path("schemaVersion").asInt()>=11) {
                     var weights=n.putArray("weights");
                     for(var row:path.weights()) {
                         var influences=weights.addArray();
@@ -420,6 +451,15 @@ public final class ProjectCodec {
                 putPoints(n.putArray("vertices"), c.vertices());
                 putId(n, "endSlotId", c.endSlotId());
                 if (root.path("schemaVersion").asInt() >= 10) n.put("color", c.color().hex());
+                if(root.path("schemaVersion").asInt()>=13) {
+                    n.put("runtimeTopology",c.runtimeTopology());
+                    var rows=n.putArray("weights");
+                    for(var row:c.weights()) {
+                        var values=rows.addArray();
+                        for(var influence:row)values.addObject().put("boneId",influence.boneId().value())
+                                .put("x",influence.point().x()).put("y",influence.point().y()).put("weight",influence.weight());
+                    }
+                }
                 continue;
             }
             if (a instanceof MeshAttachment m) {
@@ -429,6 +469,7 @@ public final class ProjectCodec {
                 n.put("name", m.name());
                 n.put("slotId", m.slotId().value());
                 n.put("source", m.source());
+                if(root.path("schemaVersion").asInt()>=13)n.put("runtimeTopology",m.runtimeTopology()).put("color",m.color().hex());
                 putPoints(n.putArray("vertices"), m.vertices());
                 putPoints(n.putArray("uvs"), m.uvs());
                 n.put("hull", m.hull());
@@ -455,6 +496,7 @@ public final class ProjectCodec {
             n.set("local", transformNode(r.local()));
             n.put("width", r.width());
             n.put("height", r.height());
+            if(root.path("schemaVersion").asInt()>=13)n.put("color",r.color().hex());
         }
         ArrayNode animations = root.putArray("animations");
         for (var a : model.animations()) {
@@ -550,7 +592,8 @@ public final class ProjectCodec {
                 ik.boneIds().forEach(id -> n.withArray("boneIds").add(id.value()));
             }
         }
-        byte[] bytes = mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(root);
+        byte[] bytes = Boolean.getBoolean("openbone.project.compact") ? mapper.writeValueAsBytes(root)
+                : mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(root);
         if (bytes.length > MAX_BYTES)
             throw new ProjectFormatException("Project exceeds " + MAX_BYTES + " bytes");
         return bytes;

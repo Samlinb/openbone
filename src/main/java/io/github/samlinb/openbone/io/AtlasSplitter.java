@@ -68,7 +68,10 @@ public final class AtlasSplitter {
                     extracted.put(key,output);
                 }
                 attachments.add(MeshEdits.source(attachment,output.toString()));
-                metadata.remove(attachment.id());
+                if (region != null && region.premultiplied()) {
+                    metadata.put(attachment.id(), new AtlasRegion(region.originalWidth(), region.originalHeight(),
+                            0,0,region.originalWidth(),region.originalHeight(),region.originalWidth(),region.originalHeight(),0,0,false,true));
+                } else metadata.remove(attachment.id());
             }
             var resources=document.resources();
             var result=new DocumentSnapshot(document.bones(),document.slots(),attachments,document.animations(),document.constraints(),
@@ -96,8 +99,18 @@ public final class AtlasSplitter {
         var result=new BufferedImage(region.originalWidth(),region.originalHeight(),BufferedImage.TYPE_INT_ARGB);
         int top=region.originalHeight()-region.offsetY()-region.height();
         for(int y=0;y<region.height();y++) for(int x=0;x<region.width();x++) {
-            int sourceX=region.x()+(region.rotated()?y:x);
-            int sourceY=region.y()+(region.rotated()?region.width()-1-x:y);
+            int sourceX=region.x()+switch(region.degrees()) {
+                case 90 -> y;
+                case 180 -> region.width()-1-x;
+                case 270 -> region.height()-1-y;
+                default -> x;
+            };
+            int sourceY=region.y()+switch(region.degrees()) {
+                case 90 -> region.width()-1-x;
+                case 180 -> region.height()-1-y;
+                case 270 -> x;
+                default -> y;
+            };
             result.setRGB(region.offsetX()+x,top+y,page.getRGB(sourceX,sourceY));
         }
         return result;

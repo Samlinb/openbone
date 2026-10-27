@@ -70,7 +70,7 @@ final class SceneMcpEdits {
             }
             case "edit_slot" -> {
                 fields(e,"op","slotId","name","boneId","activeAttachmentId");
-                yield ModelEdits.editSlot(d,id(e,"slotId"),s->new Slot(s.id(),e.has("name")?text(e,"name"):s.name(),e.has("boneId")?id(e,"boneId"):s.boneId(),e.has("activeAttachmentId")?nullableId(e,"activeAttachmentId"):s.activeAttachmentId(),s.blend(),s.color()));
+                yield ModelEdits.editSlot(d,id(e,"slotId"),s->new Slot(s.id(),e.has("name")?text(e,"name"):s.name(),e.has("boneId")?id(e,"boneId"):s.boneId(),e.has("activeAttachmentId")?nullableId(e,"activeAttachmentId"):s.activeAttachmentId(),s.blend(),s.color(),e.has("activeAttachmentId")?null:s.setupAttachmentName()));
             }
             case "create_region" -> {
                 fields(e,"op","attachmentId","slotId","name","pngPath","setup","width","height","makeActive");
@@ -82,7 +82,7 @@ final class SceneMcpEdits {
                 String source=null;
                 if(e.has("pngPath")) { Path path=png(e); ImageAssets.readPng(path); source=path.toString(); }
                 String validatedSource=source;
-                yield ModelEdits.editRegion(d,id(e,"attachmentId"),r->new RegionAttachment(r.id(),e.has("name")?text(e,"name"):r.name(),r.slotId(),validatedSource==null?r.source():validatedSource,e.has("setup")?transform(e.get("setup")):r.local(),e.has("width")?positive(e,"width"):r.width(),e.has("height")?positive(e,"height"):r.height()));
+                yield ModelEdits.editRegion(d,id(e,"attachmentId"),r->new RegionAttachment(r.id(),e.has("name")?text(e,"name"):r.name(),r.slotId(),validatedSource==null?r.source():validatedSource,e.has("setup")?transform(e.get("setup")):r.local(),e.has("width")?positive(e,"width"):r.width(),e.has("height")?positive(e,"height"):r.height(),r.color()));
             }
             case "set_slot_order" -> {
                 fields(e,"op","slotIds"); var values=e.get("slotIds");

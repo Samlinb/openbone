@@ -33,6 +33,23 @@ public final class ImageResources {
         return AtlasSplitter.unpack(ImageAssets.readPng(entry.key().source()),entry.key().region());
     }
 
+    /** Worker-owned cache: a packed page is decoded once for all of its logical regions. */
+    public static class PreviewCache {
+        private final Map<Path,BufferedImage> pages=new HashMap<>();
+        private final Map<Path,IOException> failures=new HashMap<>();
+        protected BufferedImage read(Path source) throws IOException { return ImageAssets.readPng(source); }
+        public BufferedImage preview(Entry entry) throws IOException {
+            Path source=entry.key().source();
+            if(failures.containsKey(source))throw failures.get(source);
+            var page=pages.get(source);
+            if(page==null) {
+                try {page=read(source);pages.put(source,page);}
+                catch(IOException invalid) {failures.put(source,invalid);throw invalid;}
+            }
+            return AtlasSplitter.unpack(page,entry.key().region());
+        }
+    }
+
     /** Relink every reference to this logical image; retain IDs, geometry, size and all timelines. */
     public static DocumentSnapshot replace(DocumentSnapshot document, Path base, Entry entry, Path replacement) throws IOException {
         Path source=replacement.toAbsolutePath().normalize();

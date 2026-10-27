@@ -24,7 +24,15 @@ final class ImageResourcePanel extends JPanel {
     private final DefaultListModel<ImageResources.Entry> rows=new DefaultListModel<>();
     private final JList<ImageResources.Entry> list=new JList<>(rows);
     private final Map<ImageResources.Key,BufferedImage> cache=new HashMap<>();
+    private final Map<ImageResources.Key,ImageIcon> icons=new HashMap<>();
     private final Map<ImageResources.Key,String> failures=new HashMap<>();
+    private final Supplier<ImageResources.PreviewCache> previewCaches;
+    private SwingWorker<Void,LoadedPreview> previewWorker;
+    private long previewGeneration;
+    private java.util.List<Attachment> listedAttachments;
+    private Map<EntityId,AtlasRegion> listedAtlas;
+    private Path listedBase;
+    private record LoadedPreview(ImageResources.Key key,BufferedImage image,ImageIcon icon,String failure) {}
     private final Preview preview=new Preview();
     private final JLabel details=new JLabel(" ");
     private final JButton open=new JButton(m("images.preview")),replace=new JButton(m("images.replace")),show=new JButton(m("images.locate"));
@@ -32,8 +40,13 @@ final class ImageResourcePanel extends JPanel {
 
     ImageResourcePanel(String name,Supplier<CommandHistory> history,Supplier<Path> base,BooleanSupplier prepare,
             Runnable changed,Consumer<Exception> error,Consumer<EntityId> locate) {
+        this(name,history,base,prepare,changed,error,locate,ImageResources.PreviewCache::new);
+    }
+    ImageResourcePanel(String name,Supplier<CommandHistory> history,Supplier<Path> base,BooleanSupplier prepare,
+            Runnable changed,Consumer<Exception> error,Consumer<EntityId> locate,Supplier<ImageResources.PreviewCache> previewCaches) {
         super(new BorderLayout(5,5));
         this.history=history;this.base=base;this.prepare=prepare;this.changed=changed;this.error=error;this.locate=locate;
+        this.previewCaches=previewCaches;
         setName(name);setBorder(BorderFactory.createEmptyBorder(5,5,5,5));
         list.setName(name+".list");list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);list.setFixedCellHeight(58);
         list.setCellRenderer(new DefaultListCellRenderer(){
@@ -41,10 +54,9 @@ final class ImageResourcePanel extends JPanel {
                 var label=(JLabel)super.getListCellRendererComponent(owner,value,index,selected,focus);
                 if(value instanceof ImageResources.Entry entry) {
                     label.setText(entry.name());label.setToolTipText(entry.key().source().toString());
-                    var image=image(entry);
-                    if(image!=null) { var icon=new BufferedImage(48,48,BufferedImage.TYPE_INT_ARGB);var g=icon.createGraphics();
-                        paintImage(g,image,48,48);g.dispose();label.setIcon(new ImageIcon(icon)); }
-                    else label.setIcon(null);
+                    // Swing invokes renderers during layout as well as painting.
+                    // Never read files, decode pages or allocate thumbnails here.
+                    label.setIcon(icons.get(entry.key()));
                 }
                 return label;
             }
@@ -65,27 +77,64 @@ final class ImageResourcePanel extends JPanel {
     }
 
     private BufferedImage image(ImageResources.Entry entry) {
-        if(failures.containsKey(entry.key())) return null;
-        var image=cache.get(entry.key());
-        if(image==null) try {image=ImageResources.preview(entry);cache.put(entry.key(),image);}
-        catch(Exception invalid){failures.put(entry.key(),invalid.getMessage());}
-        return image;
+        return cache.get(entry.key());
+    }
+
+    private void loadPreviews(java.util.List<ImageResources.Entry> entries,boolean changedEntries) {
+        if(!changedEntries&&previewWorker!=null)return;
+        if(changedEntries&&previewWorker!=null)previewWorker.cancel(true);
+        var pending=entries.stream().filter(e->!cache.containsKey(e.key())&&!failures.containsKey(e.key())).toList();
+        long generation=++previewGeneration;
+        if(pending.isEmpty()){previewWorker=null;return;}
+        previewWorker=new SwingWorker<>() {
+            @Override protected Void doInBackground() {
+                var decoded=previewCaches.get();
+                for(var entry:pending) {
+                    if(isCancelled())break;
+                    LoadedPreview result;
+                    try {
+                        var image=decoded.preview(entry);
+                        var thumbnail=new BufferedImage(48,48,BufferedImage.TYPE_INT_ARGB);var g=thumbnail.createGraphics();
+                        paintImage(g,image,48,48);g.dispose();
+                        result=new LoadedPreview(entry.key(),image,new ImageIcon(thumbnail),null);
+                    } catch(Exception invalid) {result=new LoadedPreview(entry.key(),null,null,invalid.getMessage());}
+                    if(!isCancelled())publish(result);
+                }
+                return null;
+            }
+            @Override protected void process(java.util.List<LoadedPreview> results) {
+                if(generation!=previewGeneration||isCancelled())return;
+                for(var result:results) {
+                    if(result.image()!=null){cache.put(result.key(),result.image());icons.put(result.key(),result.icon());}
+                    else failures.put(result.key(),result.failure());
+                }
+                list.repaint();updatePreview();
+            }
+        };
+        previewWorker.execute();
     }
 
     void refresh() {
+        var model=history.get().state().model();var directory=base.get();
+        // Playback/seek refreshes have identical immutable image inputs. Do not
+        // rebuild the list or restart workers on every captured animation frame.
+        if(model.attachments()==listedAttachments&&model.resources().atlas()==listedAtlas&&Objects.equals(directory,listedBase))return;
         refreshing=true;
         try {
-            var selected=list.getSelectedValue();var entries=ImageResources.list(history.get().state().model(),base.get());
+            var selected=list.getSelectedValue();var entries=ImageResources.list(model,directory);
+            listedAttachments=model.attachments();listedAtlas=model.resources().atlas();listedBase=directory;
             // Retain decoded thumbnails when only bones, selection or animation keys changed.
             var keys=new HashSet<>(entries.stream().map(ImageResources.Entry::key).toList());
-            cache.keySet().retainAll(keys);failures.keySet().retainAll(keys);
-            if(!entries.equals(Collections.list(rows.elements()))) {rows.clear();entries.forEach(rows::addElement);}
+            cache.keySet().retainAll(keys);icons.keySet().retainAll(keys);failures.keySet().retainAll(keys);
+            boolean changedEntries=!entries.equals(Collections.list(rows.elements()));
+            if(changedEntries) {rows.clear();rows.addAll(entries);}
             int index=-1;
             for(int i=0;i<rows.size();i++) if(selected!=null && (rows.get(i).key().equals(selected.key())
                     || rows.get(i).attachments().stream().anyMatch(selected.attachments()::contains))) {index=i;break;}
             if(index<0&&!rows.isEmpty()) index=0;
             list.setSelectedIndex(index);
-        } catch(Exception invalid){rows.clear();details.setText(m("images.empty"));error.accept(invalid);}
+            loadPreviews(entries,changedEntries);
+        } catch(Exception invalid){listedAttachments=null;rows.clear();details.setText(m("images.empty"));error.accept(invalid);}
         finally {refreshing=false;}
         updatePreview();
     }
@@ -94,8 +143,8 @@ final class ImageResourcePanel extends JPanel {
         var entry=list.getSelectedValue();var image=entry==null?null:image(entry);preview.image=image;preview.repaint();
         open.setEnabled(image!=null);replace.setEnabled(entry!=null);show.setEnabled(entry!=null);
         if(entry==null) {details.setText(m("images.empty"));details.setToolTipText(null);return;}
-        details.setText((image==null?m("images.missing"):image.getWidth()+" × "+image.getHeight())+" · "+entry.attachments().size()+" "+m("images.references"));
-        details.setToolTipText(image==null?failures.get(entry.key()):entry.key().source().toString());
+        details.setText((image==null?(failures.containsKey(entry.key())?m("images.missing"):"…"):image.getWidth()+" × "+image.getHeight())+" · "+entry.attachments().size()+" "+m("images.references"));
+        details.setToolTipText(image==null&&failures.containsKey(entry.key())?failures.get(entry.key()):entry.key().source().toString());
     }
 
     private void openPreview() {
@@ -114,7 +163,9 @@ final class ImageResourcePanel extends JPanel {
             var commandHistory=history.get();
             var result=ImageResources.replace(commandHistory.state().model(),base.get(),entry,chooser.getSelectedFile().toPath());
             commandHistory.execute(m("images.replace"),Commands.model(d->result));
-            cache.clear();failures.clear();changed.run();refresh();
+            cache.clear();icons.clear();failures.clear();listedAttachments=null;
+            if(previewWorker!=null)previewWorker.cancel(true);previewWorker=null;previewGeneration++;
+            changed.run();refresh();
         } catch(Exception invalid){error.accept(invalid);}
     }
 

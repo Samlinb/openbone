@@ -141,9 +141,11 @@ public record WorldPose(Map<EntityId, BoneWorld> bones, Map<EntityId, RegionWorl
                 continue;
             }
             if (attachment instanceof ClippingAttachment c) {
+                remainingDeforms.remove(c.id());
                 var matrix = worlds.get(bySlot.get(c.slotId()).boneId()).matrix();
-                clips.put(c.id(), new PolygonWorld(c.vertices().stream().map(p -> matrix.apply(p.x(), p.y())).toList(),
-                        c.triangles()));
+                var points=c.worldVertices(matrices,matrix,deforms.get(c.id()));
+                clips.put(c.id(), new PolygonWorld(points,c.runtimeTopology() || c.weighted() || deforms.containsKey(c.id())
+                        ? MeshTopology.triangulateRuntimePolygon(points) : c.triangles()));
                 continue;
             }
             if (attachment instanceof MeshAttachment m) {

@@ -15,7 +15,11 @@ public final class VisibleGeometry {
     }
 
     public record Draw(EntityId attachmentId, EntityId slotId, String source, PolygonClipper.Geometry geometry,
-            Slot.Blend blend, Rgba color) {
+            Slot.Blend blend, Rgba color, boolean premultiplied) {
+        public Draw(EntityId attachmentId, EntityId slotId, String source, PolygonClipper.Geometry geometry,
+                Slot.Blend blend, Rgba color) {
+            this(attachmentId,slotId,source,geometry,blend,color,false);
+        }
         public Draw(EntityId attachmentId, EntityId slotId, String source, PolygonClipper.Geometry geometry, Slot.Blend blend) {
             this(attachmentId,slotId,source,geometry,blend,Rgba.WHITE);
         }
@@ -57,7 +61,12 @@ public final class VisibleGeometry {
                 }
                 if (clip != null)
                     geometry = PolygonClipper.clip(geometry, polygon.vertices(), polygon.triangles());
-                result.add(new Draw(a.id(), slot.id(), a.source(), geometry, slot.blend(),slot.color()));
+                var slotColor = slot.color();
+                var attachmentColor = a.color();
+                var color = new Rgba(slotColor.r()*attachmentColor.r(), slotColor.g()*attachmentColor.g(),
+                        slotColor.b()*attachmentColor.b(), slotColor.a()*attachmentColor.a());
+                result.add(new Draw(a.id(), slot.id(), a.source(), geometry, slot.blend(),color,
+                        region != null && region.premultiplied()));
             }
             if (clip != null && slot.id().equals(clip.endSlotId())) {
                 clip = null;

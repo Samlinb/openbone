@@ -49,17 +49,19 @@ public final class MeshEdits {
             var points = List.of(t.apply(-x, -y), t.apply(-x, y), t.apply(x, y), t.apply(x, -y));
             return new MeshAttachment(r.id(), r.name(), r.slotId(), r.source(), points,
                     List.of(new Vec2(0, 1), new Vec2(0, 0), new Vec2(1, 0), new Vec2(1, 1)), 4,
-                    MeshTopology.triangulate(points, 4));
+                    MeshTopology.triangulate(points, 4),List.of(),false,r.color());
         });
     }
 
     public static DocumentSnapshot geometry(DocumentSnapshot d, EntityId id, List<Vec2> vertices, List<Vec2> uvs,
             int hull, List<Integer> triangles) {
         var m = mesh(d, id);
+        if(m.runtimeTopology() && (m.vertices().size()!=vertices.size() || m.hull()!=hull || !m.triangles().equals(triangles)))
+            throw new IllegalArgumentException(m("meshedits.runtimeTopology"));
         if (m.weighted() && (!m.vertices().equals(vertices) || m.hull() != hull))
             throw new IllegalArgumentException(m("meshedits.0004"));
         return replace(d, id, a -> new MeshAttachment(m.id(), m.name(), m.slotId(), m.source(), vertices, uvs, hull,
-                triangles, m.weights()));
+                triangles, m.weights(),m.runtimeTopology(),m.color()));
     }
 
     public static DocumentSnapshot vertex(DocumentSnapshot d, EntityId id, int index, Vec2 position, Vec2 uv) {
@@ -108,6 +110,6 @@ public final class MeshEdits {
         if (a instanceof MeshAttachment m)
             return m.withSource(source);
         var r = (RegionAttachment) a;
-        return new RegionAttachment(r.id(), r.name(), r.slotId(), source, r.local(), r.width(), r.height());
+        return new RegionAttachment(r.id(), r.name(), r.slotId(), source, r.local(), r.width(), r.height(),r.color());
     }
 }

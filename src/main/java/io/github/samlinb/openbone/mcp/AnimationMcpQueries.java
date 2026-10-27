@@ -110,7 +110,8 @@ final class AnimationMcpQueries {
                     .put("attachmentId", t.attachmentId().value()).put("slotId", attachment.slotId().value())
                     .put("attachmentType", attachment.getClass().getSimpleName()).put("valueSemantics", "setup_offsets")
                     .put("units", "project_units").put("componentCount", t.keys().get(0).values().size());
-            var weights = attachment instanceof PathAttachment p ? p.weights() : ((MeshAttachment) attachment).weights();
+            var weights = attachment instanceof PathAttachment p ? p.weights()
+                    : attachment instanceof ClippingAttachment c ? c.weights() : ((MeshAttachment) attachment).weights();
             row.put("weighted", !weights.isEmpty()).put("space", weights.isEmpty() ? "slot_bone_local" : "influence_bone_local")
                     .put("valueLayout", weights.isEmpty() ? "xy_per_vertex" : "xy_per_influence");
             var bindings = row.putArray("valueBindings");

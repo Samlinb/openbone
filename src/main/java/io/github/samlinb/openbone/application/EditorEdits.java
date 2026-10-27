@@ -71,7 +71,7 @@ public final class EditorEdits {
                 if (!(a instanceof RegionAttachment))
                     throw new IllegalArgumentException(m("editoredits.0001"));
                 return ModelEdits.editRegion(d, id,
-                        r -> new RegionAttachment(r.id(), r.name(), r.slotId(), r.source(), t, r.width(), r.height()));
+                        r -> new RegionAttachment(r.id(), r.name(), r.slotId(), r.source(), t, r.width(), r.height(),r.color()));
             }
         return ModelEdits.editBone(d, id, b -> b.withLocal(t));
     }

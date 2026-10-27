@@ -16,7 +16,7 @@ public record Influence(EntityId boneId, Vec2 point, double weight) {
     }
 
     public static List<Influence> normalize(List<Influence> input) {
-        if (input.isEmpty() || input.size() > 4)
+        if (input.isEmpty())
             throw new IllegalArgumentException(m("influence.0002"));
         double max = input.stream().mapToDouble(i -> Math.abs(i.weight())).max().orElse(0);
         if (max == 0)
@@ -35,7 +35,7 @@ public record Influence(EntityId boneId, Vec2 point, double weight) {
     }
 
     public static void validate(List<Influence> values) {
-        if (values.isEmpty() || values.size() > 4)
+        if (values.isEmpty())
             throw new IllegalArgumentException(m("influence.0002"));
         double sum = 0;
         Set<EntityId> ids = new HashSet<>();

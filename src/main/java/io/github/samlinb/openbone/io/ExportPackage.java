@@ -74,6 +74,7 @@ public final class ExportPackage {
                         && (pixels.getWidth() != region.pageWidth() || pixels.getHeight() != region.pageHeight()))
                     throw new IOException("Atlas page dimensions changed: " + a.name());
                 if(format==Format.NATIVE&&region!=null) {
+                    if (region.premultiplied()) throw new IOException(io.github.samlinb.openbone.i18n.M.m("atlas.nativePmaConversion"));
                     var output=new ByteArrayOutputStream();
                     javax.imageio.ImageIO.write(AtlasSplitter.unpack(pixels,region),"png",output);
                     bytes=output.toByteArray();
@@ -116,8 +117,8 @@ public final class ExportPackage {
             if (region != null) {
                 atlas.append(relative).append('\n').append("size: ").append(region.pageWidth()).append(',')
                         .append(region.pageHeight())
-                        .append("\nformat: RGBA8888\nfilter: Nearest,Nearest\nrepeat: none\npma: false\n").append(name)
-                        .append("\n  rotate: ").append(region.rotated() ? "true" : "false").append("\n  xy: ")
+                        .append("\nformat: RGBA8888\nfilter: Nearest,Nearest\nrepeat: none\npma: ").append(region.premultiplied()).append('\n').append(name)
+                        .append("\n  rotate: ").append(region.degrees()==0 ? "false" : region.degrees()==90 ? "true" : Integer.toString(region.degrees())).append("\n  xy: ")
                         .append(region.x()).append(',').append(region.y()).append("\n  size: ").append(region.width())
                         .append(',').append(region.height()).append("\n  orig: ").append(region.originalWidth())
                         .append(',').append(region.originalHeight()).append("\n  offset: ").append(region.offsetX())

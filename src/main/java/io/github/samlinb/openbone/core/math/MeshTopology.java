@@ -30,6 +30,50 @@ public final class MeshTopology {
     private MeshTopology() {
     }
 
+    /** Runtime triangle soups need valid finite coordinates and indices, not an editor planar disk.
+     * Collapsed/overlapping Setup faces, unused vertices, holes and multiple islands are legal:
+     * animation and skinning can move their vertices independently. Source indices are retained.
+     */
+    public static void validateRuntime(List<Vec2> vertices,int hull,List<Integer> triangles) {
+        if(vertices.isEmpty() || vertices.size()>MAX_VERTICES || hull<0 || hull>vertices.size()
+                || triangles.size()%3!=0 || triangles.size()>3*MAX_VERTICES*MAX_VERTICES)
+            throw new IllegalArgumentException("Invalid runtime mesh vertex, hull or triangle count");
+        for(var point:vertices) Objects.requireNonNull(point,"runtime vertex");
+        for(int index:triangles)if(index<0||index>=vertices.size())
+            throw new IllegalArgumentException("Runtime mesh triangle index out of range: "+index);
+    }
+
+    /** Runtime clipping triangulates the evaluated polygon, which may collapse during animation.
+     * Collinear boundary points stay in the source vertices but need no rasterized area.
+     */
+    public static List<Integer> triangulateRuntimePolygon(List<Vec2> vertices) {
+        if(vertices.size()<3 || vertices.size()>MAX_VERTICES)throw new IllegalArgumentException("Invalid runtime polygon size");
+        var ring=new ArrayList<Integer>();
+        for(int i=0;i<vertices.size();i++)if(ring.isEmpty() || !vertices.get(ring.get(ring.size()-1)).equals(vertices.get(i)))ring.add(i);
+        if(ring.size()>1 && vertices.get(ring.get(0)).equals(vertices.get(ring.get(ring.size()-1))))ring.remove(ring.size()-1);
+        if(ring.size()<3)return List.of();
+        int sign=area(vertices,vertices.size()).signum();
+        if(sign==0)return List.of();
+        var output=new ArrayList<Integer>();
+        while(ring.size()>2) {
+            boolean found=false;
+            for(int i=0;i<ring.size();i++) {
+                int a=ring.get((i+ring.size()-1)%ring.size()),b=ring.get(i),c=ring.get((i+1)%ring.size());
+                int direction=orient(vertices.get(a),vertices.get(b),vertices.get(c));
+                if(direction==0 && onSegment(vertices.get(b),vertices.get(a),vertices.get(c))) {
+                    ring.remove(i);found=true;break;
+                }
+                if(direction!=sign)continue;
+                boolean blocked=false;
+                for(int p:ring)if(p!=a&&p!=b&&p!=c&&insideTriangle(vertices.get(p),vertices.get(a),vertices.get(b),vertices.get(c),true)){blocked=true;break;}
+                if(blocked)continue;
+                output.addAll(List.of(a,b,c));ring.remove(i);found=true;break;
+            }
+            if(!found)throw new IllegalArgumentException("Runtime clipping polygon cannot be triangulated");
+        }
+        return List.copyOf(output);
+    }
+
     private static BigDecimal b(double v) {
         return BigDecimal.valueOf(v);
     }
@@ -91,6 +135,10 @@ public final class MeshTopology {
     }
 
     public static void boundary(List<Vec2> v, int hull) {
+        boundary(v, hull, false);
+    }
+
+    private static void boundary(List<Vec2> v, int hull, boolean existingTriangles) {
         if (v.size() < 3 || v.size() > MAX_VERTICES || hull < 3 || hull > v.size())
             throw new IllegalArgumentException(m("meshtopology.0001"));
         for (int i = 0; i < v.size(); i++)
@@ -98,7 +146,8 @@ public final class MeshTopology {
                 if (v.get(i).x() == v.get(j).x() && v.get(i).y() == v.get(j).y())
                     throw new IllegalArgumentException(m("meshtopology.0002") + i + ", " + j);
         for (int i = 0; i < hull; i++) {
-            if (orient(v.get((i + hull - 1) % hull), v.get(i), v.get((i + 1) % hull)) == 0)
+            if (orient(v.get((i + hull - 1) % hull), v.get(i), v.get((i + 1) % hull)) == 0
+                    && (!existingTriangles || !onSegment(v.get(i), v.get((i + hull - 1) % hull), v.get((i + 1) % hull))))
                 throw new IllegalArgumentException(m("meshtopology.0003") + i);
             for (int j = i + 1; j < hull; j++) {
                 if (j == i + 1 || i == 0 && j == hull - 1)
@@ -249,7 +298,9 @@ public final class MeshTopology {
     }
 
     private static void validateUncached(List<Vec2> v, int hull, List<Integer> triangles) {
-        boundary(v, hull);
+        // Runtime exports may retain a hull vertex on a straight boundary segment.
+        // Preserve it when supplied nondegenerate faces still form an exact cover.
+        boundary(v, hull, true);
         if (triangles.size() != 3 * (2 * v.size() - hull - 2))
             throw new IllegalArgumentException(m("meshtopology.0012"));
         int sign = area(v, hull).signum();

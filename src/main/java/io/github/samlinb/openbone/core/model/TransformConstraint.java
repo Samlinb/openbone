@@ -21,8 +21,8 @@ public record TransformConstraint(EntityId id, String name, int order, boolean e
             throw new IllegalArgumentException(m("transformconstraint.0002"));
         for (double v : mix) {
             Finite.require(v, "transform mix");
-            if (v < 0 || v > 1)
-                throw new IllegalArgumentException(m("transformconstraint.0003"));
+            // Runtime exports permit extrapolating mixes outside the UI's 0–1 range.
+            // Preserve finite coefficients rather than clipping imported poses.
         }
         offset.forEach(v -> Finite.require(v, "transform offset"));
     }

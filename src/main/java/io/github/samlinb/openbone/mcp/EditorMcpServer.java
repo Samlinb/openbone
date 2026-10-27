@@ -92,7 +92,7 @@ public final class EditorMcpServer implements AutoCloseable {
                     var initialized = json.createObjectNode().put("protocolVersion", VERSIONS.contains(params.get("protocolVersion").asText()) ? params.get("protocolVersion").asText() : PROTOCOL);
                     initialized.putObject("serverInfo").put("name", "openbone").put("version", io.github.samlinb.openbone.EditorApplication.version());
                     initialized.putObject("capabilities").putObject("tools").put("listChanged", false);
-                    initialized.put("instructions", "Operate the currently open OpenBone editor. Read context for mcpApiVersion and capabilities, then query scene before editing. Build bones, slots, PNG regions and animations with apply_edits. Use exact UUIDs, expectedRevision and a unique requestId; retain identical arguments on retries. Batches are atomic and undoable. Capture several times, optionally fit and hide overlays. Project save/load and playback are available; loading dirty projects requires explicit dirtyPolicy. Export is not exposed.");
+                    initialized.put("instructions", "Operate the currently open OpenBone editor. Read context for mcpApiVersion and capabilities, then query scene before editing. Use exact UUIDs, expectedRevision and a unique requestId; retain identical arguments on retries. Batches are atomic and undoable. Preview captures use the real GL viewport. Project save/load, playback, Spine export and asynchronous MP4 rendering are available. Loading dirty projects requires explicit dirtyPolicy. Poll render_status for media jobs; active media export makes mutation and viewport-control tools busy until completion or cancellation.");
                     result = initialized;
                 }
                 case "ping" -> result = json.createObjectNode();
@@ -131,5 +131,5 @@ public final class EditorMcpServer implements AutoCloseable {
         exchange.getResponseBody().write(bytes);
     }
 
-    @Override public void close() { server.stop(0); executor.shutdownNow(); }
+    @Override public void close() { tools.close(); server.stop(0); executor.shutdownNow(); }
 }

@@ -41,11 +41,13 @@ final class P8ProjectJson {
         d.resources().atlas().entrySet().stream()
                 .sorted(Map.Entry.comparingByKey(Comparator.comparing(EntityId::value))).forEach(entry -> {
                     var t = entry.getValue();
-                    atlas.addObject().put("attachmentId", entry.getKey().value()).put("pageWidth", t.pageWidth())
+                    var item = atlas.addObject().put("attachmentId", entry.getKey().value()).put("pageWidth", t.pageWidth())
                             .put("pageHeight", t.pageHeight()).put("x", t.x()).put("y", t.y()).put("width", t.width())
                             .put("height", t.height()).put("originalWidth", t.originalWidth())
                             .put("originalHeight", t.originalHeight()).put("offsetX", t.offsetX())
                             .put("offsetY", t.offsetY()).put("rotated", t.rotated());
+                    if (t.premultiplied()) item.put("premultiplied", true);
+                    if (t.degrees() != 0 && t.degrees() != 90) item.put("degrees", t.degrees());
                 });
     }
 
@@ -81,13 +83,17 @@ final class P8ProjectJson {
         }
         var atlas = new LinkedHashMap<EntityId, AtlasRegion>();
         for (var a : array(r, "atlas", p)) {
-            fields(a, p + ".atlas", "attachmentId", "pageWidth", "pageHeight", "x", "y", "width", "height",
-                    "originalWidth", "originalHeight", "offsetX", "offsetY", "rotated");
+            var keys = new ArrayList<>(List.of("attachmentId", "pageWidth", "pageHeight", "x", "y", "width", "height",
+                    "originalWidth", "originalHeight", "offsetX", "offsetY", "rotated"));
+            if (a.has("premultiplied")) keys.add("premultiplied");
+            if (a.has("degrees")) keys.add("degrees");
+            fields(a, p + ".atlas", keys.toArray(String[]::new));
             var region = new AtlasRegion(integer(a.get("pageWidth"), p), integer(a.get("pageHeight"), p),
                     integer(a.get("x"), p), integer(a.get("y"), p), integer(a.get("width"), p),
                     integer(a.get("height"), p), integer(a.get("originalWidth"), p),
                     integer(a.get("originalHeight"), p), integer(a.get("offsetX"), p), integer(a.get("offsetY"), p),
-                    bool(a, "rotated", p));
+                    bool(a, "rotated", p), a.has("premultiplied") && bool(a, "premultiplied", p),
+                    a.has("degrees") ? integer(a.get("degrees"),p) : bool(a,"rotated",p) ? 90 : 0);
             if (atlas.putIfAbsent(id(a, "attachmentId", p), region) != null)
                 throw bad(p, "Duplicate atlas attachment");
         }

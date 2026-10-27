@@ -50,13 +50,17 @@ final class SpineMetadataJson {
 
     static void writeProject(ObjectNode n, SpineMetadata metadata) {
         writeSkeleton(n.putObject("skeleton"), metadata);
+        if(metadata.orderedConstraintWrites())n.put("orderedConstraintWrites",true);
+        if(!metadata.importArchive().isEmpty()) {
+            var archive=n.putObject("importArchive");new TreeMap<>(metadata.importArchive()).forEach(archive::put);
+        }
         var array = n.putArray("meshes");
         metadata.meshes().entrySet().stream().sorted(Map.Entry.comparingByKey(Comparator.comparing(EntityId::value)))
                 .forEach(e -> writeMesh(array.addObject().put("attachmentId", e.getKey().value()), e.getValue()));
     }
 
     static SpineMetadata readProject(JsonNode n) throws ProjectFormatException {
-        ProjectCodec.fields(n, "$.resources.metadata", "skeleton", "meshes");
+        optionalFields(n, "$.resources.metadata", "skeleton", "meshes", "importArchive", "orderedConstraintWrites");
         optionalFields(n.get("skeleton"), "$.resources.metadata.skeleton", "hash", "audio", "x", "y", "width", "height", "fps");
         var meshes = new LinkedHashMap<EntityId, SpineMetadata.Mesh>();
         for (var mesh : ProjectCodec.array(n, "meshes", "$.resources.metadata")) {
@@ -64,7 +68,16 @@ final class SpineMetadataJson {
             if (meshes.putIfAbsent(new EntityId(ProjectCodec.text(mesh, "attachmentId", "$.resources.metadata.meshes")), readMesh(mesh, "$.resources.metadata.meshes")) != null)
                 throw ProjectCodec.bad("$.resources.metadata.meshes", "Duplicate mesh metadata");
         }
-        return readSkeleton(n.get("skeleton"), meshes);
+        var metadata=readSkeleton(n.get("skeleton"),meshes);var archive=new LinkedHashMap<String,String>();
+        if(n.has("importArchive")) {
+            if(!n.get("importArchive").isObject())throw ProjectCodec.bad("$.resources.metadata.importArchive","Expected object");
+            for(var entries=n.get("importArchive").fields();entries.hasNext();) {
+                var entry=entries.next();if(!entry.getValue().isTextual())throw ProjectCodec.bad("$.resources.metadata.importArchive","Expected string values");
+                archive.put(entry.getKey(),entry.getValue().asText());
+            }
+        }
+        return new SpineMetadata(metadata.text(),metadata.numbers(),metadata.meshes(),archive,
+                n.has("orderedConstraintWrites")&&ProjectCodec.bool(n,"orderedConstraintWrites","$.resources.metadata"));
     }
 
     private static void optionalFields(JsonNode n, String p, String... keys) throws ProjectFormatException {
