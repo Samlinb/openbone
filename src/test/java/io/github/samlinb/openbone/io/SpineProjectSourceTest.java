@@ -49,6 +49,18 @@ class SpineProjectSourceTest {
         Files.writeString(temp.resolve("export/example.json"),"{\"schemaVersion\":7}");
         assertThrows(ProjectFormatException.class,()->doc.openResolved(project));assertEquals(before,doc.history().state());
     }
+    @Test void missingNativeSnapshotExplainsTrialAndRecoveryInEveryLanguage() throws Exception {
+        var project=fixture();Files.delete(temp.resolve("export/example.json"));
+        String message=assertThrows(ProjectFormatException.class,()->SpineProjectSource.resolve(project)).getMessage();
+        assertTrue(message.contains(project.toString()));assertTrue(message.contains("Trial"));
+        assertTrue(message.contains("OPENBONE_SPINE_COMMAND"));assertTrue(message.contains("example.json"));
+        for(var locale:io.github.samlinb.openbone.i18n.M.supported()) {
+            var bundle=ResourceBundle.getBundle("i18n/messages",locale);
+            var text=java.text.MessageFormat.format(bundle.getString("spineProject.noSnapshot"),"source.spine","source.json","export/source.json");
+            assertTrue(text.contains("source.spine"));assertTrue(text.contains("export/source.json"));
+            assertTrue(text.contains("Trial"));assertFalse(text.contains("{0}"));
+        }
+    }
     @Test void scopedTopologyCacheNeverAcceptsMutatedGeometry() {
         var vertices=new ArrayList<>(List.of(new Vec2(0,0),new Vec2(1,0),new Vec2(0,1)));
         var triangles=new ArrayList<>(List.of(0,1,2));

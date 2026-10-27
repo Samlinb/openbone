@@ -30,6 +30,108 @@ class McpDesktopTest {
     String url, token;
     int sequence;
 
+    @Test void stretchymanOfficialExportLoadsDeformsRendersEditsAndUndoesThroughMcp() throws Exception {
+        String oldState=System.getProperty("openbone.userState"),oldPort=System.getProperty("openbone.mcp.port");
+        System.setProperty("openbone.userState",temp.resolve("stretchyman-state").toString());
+        System.setProperty("openbone.mcp.port","0");
+        McpConnectionSettings.save(McpConnectionSettings.path(),new McpConnectionSettings.State(39871,true,""));
+        Path source=Path.of(System.getProperty("openbone.stretchymanSource",
+                "src/test/resources/spine43/stretchyman/stretchyman-pro.json")).toAbsolutePath();
+        byte[] original=Files.readAllBytes(source);
+        Path output=Path.of("target/stretchyman-validation").toAbsolutePath();Files.createDirectories(output);
+        try {
+            edt(()->{frame=new EditorFrame(null);frame.setSize(1200,850);frame.showEditor();return null;});
+            awaitMcpStarted();
+            edt(()->{url=((EditorMcpServer)field("mcpServer")).url();token=(String)field("mcpToken");return null;});
+            String before=data(call("openbone_get_context",Map.of())).path("revision").asText();
+            var args=new LinkedHashMap<String,Object>(Map.of("path",source.toString(),"expectedRevision",before,
+                    "requestId","stretchyman-risk","dirtyPolicy","reject"));
+            var risk=rpc("tools/call",Map.of("name","openbone_load_project","arguments",args)).path("result");
+            assertEquals("SPINE_VERSION_RISK",risk.path("structuredContent").path("code").asText());
+            assertEquals(before,data(call("openbone_get_context",Map.of())).path("revision").asText());
+            args.put("versionRiskApproval",json.convertValue(risk.path("structuredContent").path("versionRiskApproval"),Map.class));
+            args.put("requestId","stretchyman-approved");
+            var loaded=data(call("openbone_load_project",args));
+            assertEquals(loaded,data(call("openbone_load_project",args)));
+            var model=edt(()->frame.history().state().model());
+            assertEquals(55,model.bones().size());assertEquals(10,model.constraints().size());
+            var paths=data(call("openbone_query_scene",Map.of("kind","attachments")));
+            assertEquals(9,paths.path("total").asInt());
+            int weighted=0;
+            for(var item:paths.path("items"))if(item.path("weighted").asBoolean()) {
+                weighted++;assertEquals(item.path("vertexCount").asInt(),item.path("weights").size());
+                assertTrue(item.path("deformSize").asInt()>0);
+            }
+            assertEquals(4,weighted);
+            String revision=edt(()->frame.history().revision());
+            var clip=model.animations().stream().filter(a->a.name().equals("sneak")).findFirst().orElseThrow();
+            var nonBone=data(call("openbone_query_scene",Map.of("kind","keyframes","animationId",clip.id().value(),
+                    "trackType","non_bone","expectedRevision",revision,"limit",200)));
+            assertEquals(33,nonBone.path("total").asInt());
+            assertEquals(33,nonBone.path("items").size());
+            assertTrue(nonBone.path("items").findValuesAsText("trackType").contains("deform"));
+            assertEquals(revision,edt(()->frame.history().revision()));
+            assertEquals(model,edt(()->frame.history().state().model()));
+            var shots=new ArrayList<BufferedImage>();
+            for(double time:List.of(0.,.6,1.3)) {
+                var capture=call("openbone_capture_preview",Map.of("animationId",clip.id().value(),"time",time,
+                        "expectedRevision",revision,"fit",true,"showBones",false,"showGrid",false));
+                assertEquals(time,data(capture).path("time").asDouble());
+                var pixels=image(capture);shots.add(pixels);
+                int foreground=0,background=pixels.getRGB(0,0);
+                for(int y=0;y<pixels.getHeight();y++)for(int x=0;x<pixels.getWidth();x++)if(pixels.getRGB(x,y)!=background)foreground++;
+                assertTrue(foreground>1000,"Actual character textures must render");
+                ImageIO.write(pixels,"PNG",output.resolve("sneak-"+time+".png").toFile());
+            }
+            int changed=0;
+            for(int y=0;y<shots.get(0).getHeight();y++)for(int x=0;x<shots.get(0).getWidth();x++)
+                if(shots.get(0).getRGB(x,y)!=shots.get(1).getRGB(x,y))changed++;
+            assertTrue(changed>500,"Weighted path animation must change viewport pixels");
+            var authoredId=EntityId.create();
+            var armIk=model.constraints().stream().filter(c->c.name().equals("front-arm-ik")).findFirst().orElseThrow();
+            var legPath=(PathAttachment)model.attachments().stream().filter(a->a.name().equals("front-leg-path")).findFirst().orElseThrow();
+            var correction=new ArrayList<Double>(Collections.nCopies(legPath.deformSize(),0.));correction.set(7,12.);
+            var authored=data(call("openbone_apply_edits",Map.of("expectedRevision",revision,"requestId","author-non-bone",
+                    "edits",List.of(Map.of("op","create_animation","animationId",authoredId.value(),"name","authored-regression"),
+                            Map.of("op","put_constraint_keyframe","animationId",authoredId.value(),"constraintId",armIk.id().value(),
+                                    "channel","IK","time",0,"values",List.of(0.,0.,1.,0.,0.)),
+                            Map.of("op","put_deform_keyframe","animationId",authoredId.value(),"attachmentId",legPath.id().value(),
+                                    "time",0,"values",correction)))));
+            assertEquals(1,authored.path("undoCount").asInt());
+            var authoredPreview=call("openbone_capture_preview",Map.of("animationId",authoredId.value(),"time",0,
+                    "expectedRevision",authored.path("revision").asText(),"fit",true,"showBones",false,"showGrid",false));
+            assertEquals(authoredId.value(),data(authoredPreview).path("animationId").asText());
+            assertTrue(image(authoredPreview).getWidth()>0);
+            call("openbone_undo",Map.of("expectedRevision",authored.path("revision").asText(),"requestId","author-non-bone-undo"));
+            assertEquals(model,edt(()->frame.history().state().model()));
+            revision=edt(()->frame.history().revision());
+            var bone=model.bones().get(0);
+            var edit=Map.of("expectedRevision",revision,"requestId","stretchyman-edit","edits",List.of(Map.of("op","put_keyframe",
+                    "animationId",clip.id().value(),"boneId",bone.id().value(),"channel","ROTATE","time",0,"values",List.of(10))));
+            var edited=data(call("openbone_apply_edits",edit));
+            call("openbone_undo",Map.of("expectedRevision",edited.path("revision").asText(),"requestId","stretchyman-undo"));
+            assertEquals(model,edt(()->frame.history().state().model()));
+            Path saved=output.resolve("stretchyman.openbone.json");
+            call("openbone_save_project",Map.of("path",saved.toString(),"portable",true,"overwrite",true,
+                    "expectedRevision",edt(()->frame.history().revision()),"requestId","stretchyman-save"));
+            call("openbone_load_project",Map.of("path",saved.toString(),"dirtyPolicy","reject",
+                    "expectedRevision",edt(()->frame.history().revision()),"requestId","stretchyman-reopen"));
+            var reopened=edt(()->frame.history().state().model());
+            assertEquals(model.animations(),reopened.animations());
+            assertEquals(model.attachments().stream().filter(a->a instanceof PathAttachment).toList(),
+                    reopened.attachments().stream().filter(a->a instanceof PathAttachment).toList());
+            var idle=reopened.animations().stream().filter(a->a.name().equals("idle")).findFirst().orElseThrow();
+            var idleCapture=call("openbone_capture_preview",Map.of("animationId",idle.id().value(),"time",0,
+                    "expectedRevision",edt(()->frame.history().revision()),"fit",true,"showBones",false,"showGrid",false));
+            ImageIO.write(image(idleCapture),"PNG",output.resolve("idle.png").toFile());
+            assertArrayEquals(original,Files.readAllBytes(source));
+            System.out.println("Stretchyman live source: "+source);
+        } finally {
+            if(frame!=null)edt(()->{if(frame.isDisplayable()){frame.history().markSaved();invoke("closeRequested");}return null;});
+            restore("openbone.userState",oldState);restore("openbone.mcp.port",oldPort);
+        }
+    }
+
     @Test void xiaoheiBinaryLoadsRendersAnimatesEditsAndUndoesThroughMcp() throws Exception {
         String oldState=System.getProperty("openbone.userState"), oldPort=System.getProperty("openbone.mcp.port");
         System.setProperty("openbone.userState",temp.resolve("xiaohei-state").toString());

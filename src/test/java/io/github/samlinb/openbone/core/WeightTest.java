@@ -31,7 +31,7 @@ class WeightTest {
     @Test void safeNormalizationLargeTinyAndZeros(){
         for(double scale:new double[]{1,1e300,1e-300}){var n=Influence.normalize(List.of(new Influence(id(1),new Vec2(0,0),scale),new Influence(id(2),new Vec2(0,0),scale*2)));assertEquals(1.0/3,n.get(0).weight());assertEquals(2.0/3,n.get(1).weight());}
         var zeros=Influence.normalize(List.of(new Influence(id(1),new Vec2(0,0),0),new Influence(id(2),new Vec2(0,0),2)));assertEquals(0,zeros.get(0).weight());assertEquals(1,zeros.get(1).weight());
-        assertThrows(IllegalArgumentException.class,()->Influence.normalize(List.of(new Influence(id(1),new Vec2(0,0),0))));assertThrows(IllegalArgumentException.class,()->new Influence(id(1),new Vec2(0,0),-1));assertThrows(IllegalArgumentException.class,()->new Influence(id(1),new Vec2(0,0),Double.NaN));assertThrows(IllegalArgumentException.class,()->Influence.normalize(List.of(new Influence(id(1),new Vec2(0,0),1),new Influence(id(1),new Vec2(0,0),2))));
+        assertThrows(IllegalArgumentException.class,()->Influence.normalize(List.of(new Influence(id(1),new Vec2(0,0),0))));assertThrows(IllegalArgumentException.class,()->Influence.normalize(List.of(new Influence(id(1),new Vec2(0,0),-1))));assertThrows(IllegalArgumentException.class,()->new Influence(id(1),new Vec2(0,0),Double.NaN));assertThrows(IllegalArgumentException.class,()->Influence.normalize(List.of(new Influence(id(1),new Vec2(0,0),1),new Influence(id(1),new Vec2(0,0),2))));
     }
     @Test void invalidBindingHistoryRedoAndZeroInverseRemainAtomic(){
         var h=new CommandHistory(fixture());h.select(Selection.of(id(20)));h.execute("bind",Commands.model(d->WeightEdits.bind(d,id(20),List.of(new WeightEdits.Binding(id(2),1)))));h.undo();var initial=h.state();
