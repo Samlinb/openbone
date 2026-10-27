@@ -42,15 +42,24 @@ public final class RuntimeRange {
     }
 
     public static void validate(DocumentSnapshot d) throws ProjectFormatException {
-        for(var attachment:d.attachments())if(attachment instanceof PathAttachment path
-                &&(path.weighted()||d.animations().stream().flatMap(a->a.deforms().stream()).anyMatch(t->t.attachmentId().equals(path.id()))))
-            throw new ProjectFormatException(io.github.samlinb.openbone.i18n.M.m("pathattachment.runtimeExport"));
+        if (!d.resources().activation().equals(SkinActivation.EMPTY) || d.skins().size()>1
+                && d.attachments().stream().anyMatch(a->a instanceof PathAttachment)) {
+            for(var skin:d.skins()) {
+                var selected=d.withResources(d.resources().skin(skin.name()));
+                validateOne(new DocumentSnapshot(d.bones(),selected.resolvedSlots(null,0,false),d.attachments(),
+                        d.animations(),d.constraints(),selected.resources()));
+            }
+        } else validateOne(d);
+    }
+
+    private static void validateOne(DocumentSnapshot d) throws ProjectFormatException {
+        if(WeightedPathFloatDomain.needed(d)) WeightedPathFloatDomain.validate(d);
         P8Range.validate(d);
         if (d.animations().stream().anyMatch(a -> !a.constraintTracks().isEmpty())) {
             ConstraintTimelineFloatCertificate.validate(d);
             return;
         }
-        for (var c : d.constraints()) {
+        for (var c : d.activeConstraints(d.constraints())) {
             if (c instanceof PhysicsConstraint p) {
                 for (double v : p.influence())
                     number(v, "physics influence");
@@ -84,10 +93,10 @@ public final class RuntimeRange {
                 if (!p.inactive())
                     for (var id : p.boneIds()) {
                         var inverse = ClipFloatCertificate.staticInverseBound(d, d.bone(id).parentId());
-                        if (inverse.isEmpty() || inverse.getAsDouble() == 0)
+                        if ((inverse.isEmpty() || inverse.getAsDouble() == 0) && !WeightedPathFloatDomain.needed(d))
                             throw ProjectCodec.bad("path.float-certificate.parent",
                                     "Cannot certify applied-pose inverse for constrained/animated/singular parent");
-                        number(inverse.getAsDouble(), "path parent inverse");
+                        number(pathInverse(d,d.bone(id).parentId()), "path parent inverse");
                     }
                 continue;
             }
@@ -169,7 +178,7 @@ public final class RuntimeRange {
             number(b.length(), "bone length " + b.name());
         }
         StaticTransformFloatCertificate.validate(d);
-        StaticPathFloatCertificate.validate(d);
+        if(!WeightedPathFloatDomain.needed(d)) StaticPathFloatCertificate.validate(d);
         PhysicsFloatCertificate.validate(d);
         for (var a : d.attachments()) {
             if (a instanceof PathAttachment p) {
@@ -177,6 +186,7 @@ public final class RuntimeRange {
                     number(v.x(), "path local x");
                     number(v.y(), "path local y");
                 }
+                for(var row:p.weights()) for(var i:row) { number(i.point().x(),"path influence x");number(i.point().y(),"path influence y");number(i.weight(),"path influence weight"); }
                 for (double v : p.lengths())
                     number(v, "path stored length");
                 continue;
@@ -302,7 +312,10 @@ public final class RuntimeRange {
             }
             bounds(d, clip);
         }
-        Ik2PrecisionCertificate.validate(d);
+        // The legacy audit assumes normal inheritance and static IK ancestry.
+        // Weighted-path exports use the whole-animation magnitude/inverse bounds above;
+        // runtime approximation agreement is verified separately against the official runtime.
+        if(!WeightedPathFloatDomain.needed(d)) Ik2PrecisionCertificate.validate(d);
         ClipFloatCertificate.validate(d);
     }
 
@@ -389,8 +402,8 @@ public final class RuntimeRange {
         Set<EntityId> shearedLocal = new HashSet<>();
         List<Constraint> stages = new ArrayList<>();
         stages.add(null);
-        stages.addAll(clip == null ? d.constraints()
-                : d.constraints().stream().map(c -> ConstraintTimeline.envelope(clip, c)).toList());
+        stages.addAll(d.activeConstraints(clip == null ? d.constraints()
+                : d.constraints().stream().map(c -> ConstraintTimeline.envelope(clip, c)).toList()));
         for (var stage : stages) {
             if (stage instanceof IkConstraint ik && ik.enabled() && ik.mix() != 0) {
                 var b = d.bone(ik.boneIds().get(0));
@@ -492,7 +505,10 @@ public final class RuntimeRange {
                         .findFirst().orElse(null);
                 if (attachment instanceof PathAttachment path) {
                     var target = world.get(slot.boneId());
-                    var solved = PathConstraintSolver.bounds(pc, path, target[0], target[1], world, d.bones());
+                    var offsets=clip==null?new double[path.deformSize()]:DeformTimeline.bounds(clip,path.id(),path.deformSize());
+                    var inflated=new HashMap<EntityId,double[]>();
+                    world.forEach((id,v)->inflated.put(id,new double[]{v[0]*1.01,v[1]*1.01}));
+                    var solved = PathConstraintSolver.bounds(pc, path, target[0]*1.01, target[1]*1.01, inflated, d.bones(),offsets);
                     for (var id : pc.boneIds()) {
                         var old = world.get(id);
                         double length = d.bone(id).length();
@@ -502,8 +518,7 @@ public final class RuntimeRange {
                         number(output[1], "path solved position envelope");
                         number(8 * output[1] * output[1], "path point distance squares");
                         number(4 * output[1] / .00001, "path scale factor");
-                        double inverse = ClipFloatCertificate.staticInverseBound(d, d.bone(id).parentId())
-                                .orElseThrow(), applied = number(2 * inverse * output[0], "path applied local matrix");
+                        double inverse = pathInverse(d, d.bone(id).parentId()), applied = number(2 * inverse * output[0], "path applied local matrix");
                         number(2 * applied * applied * 10001, "path applied determinant/dot/division");
                         double parentPosition = d.bone(id).parentId() == null ? 0 : world.get(d.bone(id).parentId())[1];
                         number(2 * inverse * (output[1] + parentPosition), "path applied translation");
@@ -593,8 +608,8 @@ public final class RuntimeRange {
         for (var a : d.attachments()) {
             if (a instanceof PathAttachment path) {
                 var p = world.get(slots.get(path.slotId()).boneId());
-                for (var v : path.vertices())
-                    position(p[0], p[1], v.x(), v.y());
+                var offsets=clip==null?new double[path.deformSize()]:DeformTimeline.bounds(clip,path.id(),path.deformSize());
+                number(path.controlBound(world,p[0],p[1],offsets)*1.01,"weighted path control bounds");
                 continue;
             }
             if (a instanceof BoundingBoxAttachment box) {
@@ -649,6 +664,12 @@ public final class RuntimeRange {
                     pos = position(p[0], p[1], t.x(), t.y());
             number(pos + norm * Math.hypot(r.width() / 2, r.height() / 2), "complete region vertices " + r.name());
         }
+    }
+
+    private static double pathInverse(DocumentSnapshot d, EntityId id) throws ProjectFormatException {
+        var fixed=ClipFloatCertificate.staticInverseBound(d,id);
+        if(fixed.isPresent()) return fixed.getAsDouble();
+        return WeightedPathFloatDomain.inverse(d,id);
     }
 
     private static void certifyIk2(DocumentSnapshot d, IkConstraint ik, Map<EntityId, double[]> local, double distance,

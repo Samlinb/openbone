@@ -37,7 +37,7 @@ public final class SpineBinaryWriter {
     private void text(String value)throws IOException {
         if(value==null){varint(0);return;}byte[] data=value.getBytes(StandardCharsets.UTF_8);varint(data.length+1);out.write(data);
     }
-    private void ref(String value)throws IOException {varint(value==null?0:strings.get(value));}
+    private void ref(String value)throws IOException {varint(value==null||value.isEmpty()?0:strings.get(value));}
     private static String nullable(JsonNode n,String field){return n.hasNonNull(field)?n.get(field).asText():null;}
     private void number(double value)throws IOException {float f=(float)value;if(!Float.isFinite(f))throw new ProjectFormatException("Value exceeds binary float range");out.writeFloat(f);}
     private void floats(JsonNode node,String... fields)throws IOException {for(String field:fields)number(node.path(field).asDouble(defaultValue(field)));}
@@ -45,7 +45,7 @@ public final class SpineBinaryWriter {
     private void color(String value)throws IOException {out.writeInt((int)Long.parseLong(value,16));}
     private void color(JsonNode node)throws IOException {color(node.path("color").asText("ffffffff"));}
     private void collect(JsonNode node){
-        if(node.isTextual())strings.computeIfAbsent(node.asText(),k->strings.size()+1);
+        if(node.isTextual()&&!node.asText().isEmpty())strings.computeIfAbsent(node.asText(),k->strings.size()+1);
         else if(node.isObject())node.fields().forEachRemaining(e->{strings.computeIfAbsent(e.getKey(),k->strings.size()+1);collect(e.getValue());});
         else if(node.isArray())node.forEach(this::collect);
     }
@@ -60,7 +60,7 @@ public final class SpineBinaryWriter {
             String name=bone.path("name").asText();text(name);if(!bones.isEmpty())varint(index(bones,bone.path("parent").asText()));bones.add(name);
             floats(bone,"rotation","x","y","scaleX","scaleY","shearX","shearY");if(family!=SpineVersion.V43)floats(bone,"length");
             mode(bone,"inherit","normal","normal","onlyTranslation","noRotationOrReflection","noScale","noScaleOrReflection");
-            if(family==SpineVersion.V43)floats(bone,"length");out.writeBoolean(false);color(bone);
+            if(family==SpineVersion.V43)floats(bone,"length");out.writeBoolean(bone.path("skin").asBoolean());color(bone);
             if(family.atLeast(SpineVersion.V42)){text(null);if(family==SpineVersion.V43){number(1);number(0);}out.writeBoolean(true);}
         }
         varint(root.path("slots").size());for(var slot:root.path("slots")) {
@@ -84,11 +84,22 @@ public final class SpineBinaryWriter {
         if(skinNodes.isEmpty())throw new ProjectFormatException("Default skin required");
         for(var skin:root.path("skins"))if(!skin.path("name").asText().equals("default"))skinNodes.add(skin);
         boolean defaultPresent=!skinNodes.get(0).path("attachments").isEmpty();
+        for(String key:List.of("bones","ik","transform","path","physics")) if(!skinNodes.get(0).path(key).isEmpty())
+            throw ProjectCodec.bad("$.skins.default",io.github.samlinb.openbone.i18n.M.m("skinExport.binaryDefault"));
         skin(skinNodes.get(0));varint(skinNodes.size()-1);
         for(int i=1;i<skinNodes.size();i++) {
             var skin=skinNodes.get(i);String name=skin.path("name").asText();if(family.atLeast(SpineVersion.V42))text(name);else ref(name);
-            if(family.atLeast(SpineVersion.V42))color("ffffffff");int lists=family==SpineVersion.V43?2:family==SpineVersion.V42?5:4;
-            for(int j=0;j<lists;j++)varint(0);skin(skin);
+            if(family.atLeast(SpineVersion.V42))color("ffffffff");writeMembers(skin,"bones",bones);
+            if(family==SpineVersion.V43) {
+                var names=new ArrayList<String>();
+                for(var c:orderedConstraints())names.add(c.path("name").asText());
+                var members=new HashSet<String>();for(String kind:List.of("ik","transform","path","physics"))for(var n:skin.path(kind))members.add(n.asText());
+                varint(members.size());for(String member:members)varint(index(names,member));
+            } else for(String kind:family==SpineVersion.V42?List.of("ik","transform","path","physics"):List.of("ik","transform","path")) {
+                var names=new ArrayList<String>();for(var c:root.path(kind))names.add(c.path("name").asText());
+                writeMembers(skin,kind,names);
+            }
+            skin(skin);
         }
         if(!defaultPresent)skins.remove("default");
         varint(root.path("events").size());for(var definitions=root.path("events").fields();definitions.hasNext();) {
@@ -99,28 +110,28 @@ public final class SpineBinaryWriter {
     }
     private void constraint(JsonNode c,String kind,boolean v43)throws IOException {
         if(kind.equals("physics")){varint(index(bones,c.path("bone").asText()));physics(c);return;}
-        if(!v43&&(family!=SpineVersion.V42||kind.equals("path")))out.writeBoolean(false);
+        if(!v43&&(family!=SpineVersion.V42||kind.equals("path")))out.writeBoolean(c.path("skin").asBoolean());
         varint(c.path("bones").size());for(var bone:c.path("bones"))varint(index(bones,bone.asText()));varint(index(kind.equals("path")?slots:bones,c.path("target").asText()));
         switch(kind) {
             case "ik"->{
                 if(family.atLeast(SpineVersion.V42)) {
-                    int flags=32|64|128;if(c.path("bendPositive").asBoolean(true))flags|=v43?0:2;else if(v43)flags|=4;
+                    int flags=32|64|128|(c.path("skin").asBoolean()?1:0);if(c.path("bendPositive").asBoolean(true))flags|=v43?0:2;else if(v43)flags|=4;
                     if(c.path("compress").asBoolean())flags|=v43?8:4;if(c.path("stretch").asBoolean())flags|=v43?16:8;if(!v43&&c.path("uniform").asBoolean())flags|=16;
                     out.writeByte(flags);floats(c,"mix","softness");
                 }else{floats(c,"mix","softness");out.writeByte(c.path("bendPositive").asBoolean(true)?1:-1);out.writeBoolean(c.path("compress").asBoolean());out.writeBoolean(c.path("stretch").asBoolean());out.writeBoolean(c.path("uniform").asBoolean());}
             }
             case "transform"->{
                 if(v43) {
-                    out.writeByte(192|(c.path("local").asBoolean()?6:0)|(c.path("relative").asBoolean()?8:0));
+                    out.writeByte(192|(c.path("skin").asBoolean()?1:0)|(c.path("local").asBoolean()?6:0)|(c.path("relative").asBoolean()?8:0));
                     for(int i=0;i<6;i++){out.writeByte(i);number(0);out.writeByte(1);out.writeByte(i);number(0);number(1);number(1);}
                     out.writeByte(63);floats(c,"rotation","x","y","scaleX","scaleY","shearY");out.writeByte(63);floats(c,"mixRotate","mixX","mixY","mixScaleX","mixScaleY","mixShearY");
-                }else if(family==SpineVersion.V42){out.writeByte(248|(c.path("local").asBoolean()?2:0)|(c.path("relative").asBoolean()?4:0));floats(c,"rotation","x","y","scaleX","scaleY");out.writeByte(127);floats(c,"shearY","mixRotate","mixX","mixY","mixScaleX","mixScaleY","mixShearY");}
+                }else if(family==SpineVersion.V42){out.writeByte(248|(c.path("skin").asBoolean()?1:0)|(c.path("local").asBoolean()?2:0)|(c.path("relative").asBoolean()?4:0));floats(c,"rotation","x","y","scaleX","scaleY");out.writeByte(127);floats(c,"shearY","mixRotate","mixX","mixY","mixScaleX","mixScaleY","mixShearY");}
                 else{out.writeBoolean(c.path("local").asBoolean());out.writeBoolean(c.path("relative").asBoolean());floats(c,"rotation","x","y","scaleX","scaleY","shearY");mix(c,true);}
             }
             case "path"->{
                 if(family.atLeast(SpineVersion.V42)) {
                     int flags=index(List.of("fixed","percent"),c.path("positionMode").asText("percent"))|index(List.of("length","fixed","percent","proportional"),c.path("spacingMode").asText("length"))<<1|index(List.of("tangent","chain","chainScale"),c.path("rotateMode").asText("tangent"))<<3;
-                    out.writeByte((v43?flags<<1:flags)|128);
+                    out.writeByte((v43?flags<<1:flags)|128|(v43&&c.path("skin").asBoolean()?1:0));
                 }else{mode(c,"positionMode","percent","fixed","percent");mode(c,"spacingMode","length","length","fixed","percent","proportional");mode(c,"rotateMode","tangent","tangent","chain","chainScale");}
                 floats(c,"rotation","position","spacing");mix(c,false);
             }
@@ -131,7 +142,14 @@ public final class SpineBinaryWriter {
         if(transform){floats(c,"mixScaleX");if(!family.legacy())floats(c,"mixScaleY");floats(c,"mixShearY");}
     }
     private void physics(JsonNode c)throws IOException {
-        out.writeByte(254);floats(c,"x","y","rotate","scaleX","shearX","limit");out.writeByte(60);floats(c,"inertia","strength","damping");number(1/c.path("mass").asDouble(1));floats(c,"wind","gravity");out.writeByte(128);floats(c,"mix");
+        out.writeByte(254|(c.path("skin").asBoolean()?1:0));floats(c,"x","y","rotate","scaleX","shearX","limit");out.writeByte(60);floats(c,"inertia","strength","damping");number(1/c.path("mass").asDouble(1));floats(c,"wind","gravity");out.writeByte(128);floats(c,"mix");
+    }
+    private List<JsonNode> orderedConstraints() {
+        var result=new ArrayList<JsonNode>();for(String kind:List.of("ik","transform","path","physics"))root.path(kind).forEach(result::add);
+        result.sort(Comparator.comparingInt(n->n.path("order").asInt()));return result;
+    }
+    private void writeMembers(JsonNode skin,String key,List<String> names)throws IOException {
+        varint(skin.path(key).size());for(var member:skin.path(key))varint(index(names,member.asText()));
     }
     private void skin(JsonNode skin)throws IOException {
         skins.add(skin.path("name").asText());varint(skin.path("attachments").size());
@@ -140,10 +158,13 @@ public final class SpineBinaryWriter {
         }
     }
     private void values(JsonNode values)throws IOException {for(var value:values)number(value.asDouble());}
-    private void shorts(JsonNode values,boolean length)throws IOException {if(length)varint(values.size());for(var value:values)out.writeShort(value.asInt());}
+    private void shorts(JsonNode values,boolean length)throws IOException {if(length)varint(values.size());for(var value:values)if(family.atLeast(SpineVersion.V42))varint(value.asInt());else out.writeShort(value.asInt());}
     private void vertices(JsonNode a,int count,boolean modern)throws IOException {
         var values=a.path("vertices");boolean weighted=values.size()!=count*2;if(modern)varint(count);else out.writeBoolean(weighted);
         if(!weighted){values(values);return;}
+        if(family==SpineVersion.V43) {
+            int cursor=0,entries=count;for(int i=0;i<count;i++){int size=values.get(cursor).asInt();entries+=size;cursor+=1+size*4;}varint(entries);
+        }
         int cursor=0;for(int i=0;i<count;i++){int size=values.get(cursor++).asInt();varint(size);for(int j=0;j<size;j++){varint(values.get(cursor++).asInt());for(int k=0;k<3;k++)number(values.get(cursor++).asDouble());}}
     }
     private void attachment(String name,JsonNode a)throws IOException {
@@ -163,7 +184,7 @@ public final class SpineBinaryWriter {
             case 0->{ref(a.path("path").asText(name));if(modern)color(a);floats(a,"rotation","x","y","scaleX","scaleY","width","height");if(!modern)color(a);if(family==SpineVersion.V41)out.writeBoolean(false);}
             case 2->{
                 ref(a.path("path").asText(name));color(a);
-                if(modern){varint(a.path("hull").asInt());vertices(a,size,true);values(a.path("uvs"));if(a.path("triangles").size()!=(size*2-a.path("hull").asInt()-2)*3)throw new ProjectFormatException("Mesh triangle count cannot be represented by 4.2+ binary");shorts(a.path("triangles"),false);}
+                if(modern){varint(a.path("hull").asInt());vertices(a,size,true);values(a.path("uvs"));if(a.path("triangles").size()!=(size*2-a.path("hull").asInt()-2)*3)throw new ProjectFormatException("Mesh triangle count cannot be represented by 4.2+ binary");shorts(a.path("triangles"),false);if(family==SpineVersion.V43)varint(0);}
                 else{varint(size);values(a.path("uvs"));shorts(a.path("triangles"),true);vertices(a,size,false);varint(a.path("hull").asInt());if(family==SpineVersion.V41)out.writeBoolean(false);}
                 shorts(a.path("edges"),true);floats(a,"width","height");
             }

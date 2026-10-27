@@ -38,7 +38,7 @@ public final class ProjectCodec {
                 throw bad("$.schemaVersion", "Missing required field");
             JsonNode version = root.get("schemaVersion");
             if (!version.isIntegralNumber() || !version.canConvertToInt() || version.intValue() < 1
-                    || version.intValue() > 11)
+                    || version.intValue() > 12)
                 throw bad("$.schemaVersion", "Unsupported schema version: " + version);
             if (version.intValue() == 1)
                 fields(root, "$", "schemaVersion", "bones", "slots", "attachments");
@@ -341,10 +341,20 @@ public final class ProjectCodec {
                 || d.animations().stream().flatMap(a -> a.keys().stream()).flatMap(k -> k.curves().stream()).anyMatch(c -> c.x1() > c.x2());
     }
 
+    static boolean needsSkinActivation(DocumentSnapshot model) {
+        return !model.resources().activation().equals(SkinActivation.EMPTY) || hasSignedWeights(model);
+    }
+
+    static boolean hasSignedWeights(DocumentSnapshot model) {
+        return model.attachments().stream().flatMap(a -> a instanceof MeshAttachment mesh ? mesh.weights().stream()
+                : a instanceof PathAttachment path ? path.weights().stream() : java.util.stream.Stream.<List<Influence>>empty())
+                .flatMap(List::stream).anyMatch(i -> i.weight() < 0);
+    }
+
     public byte[] encode(DocumentSnapshot model) throws IOException {
         Objects.requireNonNull(model, "model");
         ObjectNode root = mapper.createObjectNode();
-        root.put("schemaVersion", needsPathGeometry(model) ? 11 : needsExtendedAnimation(model) ? 10 : !model.resources().metadata().equals(SpineMetadata.EMPTY) ? 9
+        root.put("schemaVersion", needsSkinActivation(model) ? 12 : needsPathGeometry(model) ? 11 : needsExtendedAnimation(model) ? 10 : !model.resources().metadata().equals(SpineMetadata.EMPTY) ? 9
                 : model.bones().stream().anyMatch(b -> !b.color().equals(Rgba.WHITE) || b.inherit() != Bone.Inherit.normal) ? 8
                 : model.slots().stream().anyMatch(s -> !s.color().equals(Rgba.WHITE))
                 || model.animations().stream().anyMatch(a -> !a.discrete().colors().isEmpty()) ? 7 : P8ProjectJson.needed(model) ? 6

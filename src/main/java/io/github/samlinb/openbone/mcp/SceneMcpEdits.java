@@ -14,6 +14,7 @@ final class SceneMcpEdits {
 
     static ArrayNode schemas(ObjectMapper json) {
         ArrayNode result = json.createArrayNode();
+        add(json,result,"set_skin", "\"name\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":256}", "name");
         String transform = """
             {"type":"object","additionalProperties":false,"properties":{
               "x":{"type":"number"},"y":{"type":"number"},"rotation":{"type":"number"},
@@ -43,6 +44,10 @@ final class SceneMcpEdits {
 
     static DocumentSnapshot apply(DocumentSnapshot d, JsonNode e, String op) throws Exception {
         return switch(op) {
+            case "set_skin" -> {
+                fields(e,"op","name");
+                yield io.github.samlinb.openbone.application.ExtendedEdits.skin(d,text(e,"name"));
+            }
             case "create_bone" -> {
                 fields(e,"op","boneId","name","parentId","setup","length");
                 yield ModelEdits.addBone(d,new Bone(id(e,"boneId"),text(e,"name"),nullableId(e,"parentId"),transform(e.get("setup")),num(e,"length",0),Rgba.WHITE,Bone.Inherit.normal));

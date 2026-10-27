@@ -240,3 +240,5 @@ packaging/installer/       # Windows 安装器源码
 ## 第三方声明
 
 依赖声明见 [pom.xml](pom.xml)，第三方许可与声明见 [THIRD_PARTY.txt](src/main/resources/THIRD_PARTY.txt) 和 [licenses](src/main/resources/licenses/)。Spine 名称用于说明工作流参考和数据格式兼容目标。
+
+Hero 示例已使用匹配的官方 `4.3.75-beta` JSON 快照完成加载验证：44 根骨骼、31 个插槽、30 个附件、3 个皮肤及 12 段动画。工程格式 12 保留皮肤控制的骨骼/约束及有限带负值的蒙皮权重。`HeroMcpDesktopTest`（`-Dopenbone.hero=true -Dopenbone.verifyGl=true`）覆盖剑/链锤切换、实际 OpenGL 预览、关键帧编辑、撤销及便携工程重开。未解析原生对象图；JSON 和二进制导出保留皮肤成员、负权重及受支持的加权路径；原生工程转换仍需配置授权 CLI。Hero 素材按其演示许可仅保留在本地，不随软件分发。

@@ -65,7 +65,7 @@ final class Spine38Json {
             ObjectNode n = b.deepCopy();
             rename(n, "transform", "inherit");
             fields(n, "$.bones." + n.path("name").asText(), warnings,
-                    "name", "parent", "x", "y", "rotation", "scaleX", "scaleY", "length", "color", "inherit", "shearX", "shearY");
+                    "name", "parent", "x", "y", "rotation", "scaleX", "scaleY", "length", "color", "inherit", "shearX", "shearY", "skin");
             if (n.has("color")) try { Rgba.parse(n.get("color").textValue()); }
             catch (IllegalArgumentException invalid) {
                 warnings.add("$.bones." + n.path("name").asText() + ".color: invalid bone color filtered"); n.remove("color");
@@ -129,7 +129,7 @@ final class Spine38Json {
         }
         for (var s : root.path("skins")) {
             if (!(s instanceof ObjectNode skin)) throw ProjectCodec.bad("$.skins", "Expected skin object");
-            fields(skin, "$.skins", warnings, "name", "attachments");
+            fields(skin, "$.skins", warnings, "name", "attachments", "bones", "ik", "transform", "path");
             if (!skin.path("attachments").isObject()) skin.putObject("attachments");
             var all = (ObjectNode)skin.get("attachments");
             for (var it = all.fields(); it.hasNext();) {
@@ -181,9 +181,9 @@ final class Spine38Json {
                 boolean valid = true; for (var b : n.path("bones")) valid &= bones.contains(b.asText());
                 if (!valid || n.path("bones").isEmpty()) { warnings.add("$." + kind + ": missing bone; constraint filtered"); continue; }
                 mixes(n, false);
-                if (kind.equals("ik")) fields(n, "$.ik", warnings, "name", "order", "bones", "target", "mix", "softness", "bendPositive", "compress", "stretch", "uniform");
-                else if (kind.equals("transform")) fields(n, "$.transform", warnings, "name", "order", "bones", "target", "local", "relative", "rotation", "x", "y", "scaleX", "scaleY", "shearY", "mixRotate", "mixX", "mixY", "mixScaleX", "mixScaleY", "mixShearY");
-                else fields(n, "$.path", warnings, "name", "order", "bones", "target", "positionMode", "spacingMode", "rotateMode", "position", "spacing", "rotation", "mixRotate", "mixX", "mixY");
+                if (kind.equals("ik")) fields(n, "$.ik", warnings, "skin", "name", "order", "bones", "target", "mix", "softness", "bendPositive", "compress", "stretch", "uniform");
+                else if (kind.equals("transform")) fields(n, "$.transform", warnings, "skin", "name", "order", "bones", "target", "local", "relative", "rotation", "x", "y", "scaleX", "scaleY", "shearY", "mixRotate", "mixX", "mixY", "mixScaleX", "mixScaleY", "mixShearY");
+                else fields(n, "$.path", warnings, "skin", "name", "order", "bones", "target", "positionMode", "spacingMode", "rotateMode", "position", "spacing", "rotation", "mixRotate", "mixX", "mixY");
                 out.add(n);
             }
         }

@@ -156,8 +156,14 @@ public final class SkeletonJsonCodec {
                     var n = skin.withObject("/" + escape(bySlot.get(p.slotId()).name())).putObject(p.name())
                             .put("type", "path").put("closed", p.closed()).put("constantSpeed", p.constantSpeed())
                             .put("vertexCount", p.vertices().size());
-                    for (var v : p.vertices()) {
-                        n.withArray("vertices").add(v.x()).add(v.y());
+                    var raw=n.putArray("vertices");
+                    if(!p.weighted()) for(var v:p.vertices()) raw.add(v.x()).add(v.y());
+                    else for(var row:p.weights()) {
+                        raw.add(row.size());
+                        for(var influence:row) {
+                            raw.add(d.bones().indexOf(d.bone(influence.boneId())));
+                            raw.add(influence.point().x()).add(influence.point().y()).add(influence.weight());
+                        }
                     }
                     p.lengths().forEach(n.putArray("lengths")::add);
                     continue;
@@ -239,7 +245,7 @@ public final class SkeletonJsonCodec {
             if (!clip.deforms().isEmpty()) {
                 var deformSkins = animation.putObject("attachments");
                 for (var t : clip.deforms()) {
-                    var m = (MeshAttachment) attachments.get(t.attachmentId());
+                    var m = attachments.get(t.attachmentId());
                     String skinName = d.skins().stream()
                             .filter(s -> Objects.equals(s.find(m.slotId(), m.name()), m.id())).findFirst().orElseThrow()
                             .name();
@@ -275,6 +281,7 @@ public final class SkeletonJsonCodec {
                 }
             }
         }
+        SkinActivationJson.writeRuntime(root,d);
         byte[] bytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(root);
         if (bytes.length > ProjectCodec.MAX_BYTES)
             throw new ProjectFormatException("Export exceeds 16 MiB");
@@ -716,8 +723,6 @@ public final class SkeletonJsonCodec {
                     String target = ProjectCodec.text(n, "target", p);
                     if (!boneIds.containsKey(target))
                         throw ProjectCodec.bad(p + ".target", "Unknown target bone");
-                    if (n.has("skin") && ProjectCodec.bool(n, "skin", p))
-                        throw ProjectCodec.bad(p + ".skin", "Skin-required IK is unsupported");
                     constraints.add(new IkConstraint(EntityId.create(), ProjectCodec.text(n, "name", p),
                             n.has("order") ? ProjectCodec.integer(n.get("order"), p + ".order") : 0, true, chain,
                             boneIds.get(target), num(n, "mix", 1, p), num(n, "softness", 0, p),
@@ -738,8 +743,6 @@ public final class SkeletonJsonCodec {
                     String target = ProjectCodec.text(n, "target", p);
                     if (!boneIds.containsKey(target))
                         throw ProjectCodec.bad(p + ".target", "Unknown target bone");
-                    if (bool(n, "skin", false, p))
-                        throw ProjectCodec.bad(p + ".skin", "Skin-required constraint unsupported");
                     double mixX = num(n, "mixX", 1, p), mixScaleX = num(n, "mixScaleX", 1, p);
                     constraints.add(new TransformConstraint(EntityId.create(), ProjectCodec.text(n, "name", p),
                             n.has("order") ? ProjectCodec.integer(n.get("order"), p + ".order") : 0, true, chain,
@@ -763,8 +766,6 @@ public final class SkeletonJsonCodec {
                     String target = ProjectCodec.text(n, "target", p);
                     if (!slotIds.containsKey(target))
                         throw ProjectCodec.bad(p + ".target", "Unknown target slot");
-                    if (bool(n, "skin", false, p))
-                        throw ProjectCodec.bad(p + ".skin", "Skin-required constraint unsupported");
                     double mixX = num(n, "mixX", 1, p);
                     constraints.add(new PathConstraint(EntityId.create(), ProjectCodec.text(n, "name", p),
                             n.has("order") ? ProjectCodec.integer(n.get("order"), p + ".order") : 0, true, chain,
@@ -782,8 +783,6 @@ public final class SkeletonJsonCodec {
                     String p = "$.physics[" + ci++ + "]", bone = ProjectCodec.text(n, "bone", p);
                     if (!boneIds.containsKey(bone))
                         throw ProjectCodec.bad(p + ".bone", "Unknown physics bone");
-                    if (bool(n, "skin", false, p))
-                        throw ProjectCodec.bad(p + ".skin", "Skin-required physics is unsupported");
                     if (n.has("fps") && ProjectCodec.integer(n.get("fps"), p + ".fps") != 60)
                         throw ProjectCodec.bad(p + ".fps", "Physics uses fixed 60Hz");
                     for (String field : List.of("inertiaGlobal", "strengthGlobal", "dampingGlobal", "massGlobal",
@@ -802,11 +801,12 @@ public final class SkeletonJsonCodec {
                 }
             }
             animations = ConstraintTimelineJson.read(root, animations, constraints);
+            var activation = SkinActivationJson.readRuntime(root, bones, constraints);
             var d = new DocumentSnapshot(bones, slots, attachments, animations, constraints,
-                    new Resources(importedSkins.size() == 1 && importedSkins.get(0).name().equals("default") ? List.of()
-                            : importedSkins, "default", eventDefinitions, atlasMetadata, SpineMetadataJson.readRuntime(root, attachmentIds)));
+                    new Resources(importedSkins.size() == 1 && importedSkins.get(0).name().equals("default") && activation.equals(SkinActivation.EMPTY) ? List.of()
+                            : importedSkins, "default", eventDefinitions, atlasMetadata, SpineMetadataJson.readRuntime(root, attachmentIds), activation));
             // Runtime export certificates must not delete valid editable source data.
-            if (mode == ImportMode.STRICT_42) RuntimeRange.validate(d);
+            if (mode == ImportMode.STRICT_42 && !ProjectCodec.needsSkinActivation(d)) RuntimeRange.validate(d);
             return d;
         } catch (IllegalArgumentException | NullPointerException e) {
             throw new ProjectFormatException("Invalid 4.2.22 model: " + e.getMessage(), e);
@@ -1226,7 +1226,7 @@ public final class SkeletonJsonCodec {
         int i = 0;
         for (var b : ProjectCodec.array(root, "bones", "$")) {
             String p = "$.bones[" + i++ + "]";
-            allowed(b, p, errors, "name", "parent", "x", "y", "rotation", "scaleX", "scaleY", "length", "inherit", "color", "shearX", "shearY", "icon");
+            allowed(b, p, errors, "name", "parent", "x", "y", "rotation", "scaleX", "scaleY", "length", "inherit", "color", "shearX", "shearY", "icon", "skin");
             if (b.has("inherit")) try { Bone.Inherit.valueOf(b.get("inherit").textValue()); }
             catch (IllegalArgumentException | NullPointerException invalid) { errors.add(p + ".inherit (invalid mode)"); }
         }
@@ -1240,7 +1240,8 @@ public final class SkeletonJsonCodec {
         i = 0;
         for (var skin : ProjectCodec.array(root, "skins", "$")) {
             String p = "$.skins[" + i++ + "]";
-            allowed(skin, p, errors, "name", "attachments");
+            allowed(skin, p, errors, "name", "attachments", "bones", "ik", "transform", "path", "physics");
+            if (!skin.has("attachments")) ((ObjectNode)skin).putObject("attachments");
             object(skin.get("attachments"), p + ".attachments");
             for (var si = skin.get("attachments").fields(); si.hasNext();) {
                 var se = si.next();

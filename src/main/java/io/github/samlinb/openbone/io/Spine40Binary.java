@@ -104,7 +104,7 @@ final class Spine40Binary {
     private String enumValue(String... values) throws IOException { return at(Arrays.asList(values), varint()); }
     private String color() throws IOException { return String.format(Locale.ROOT, "%08x", in.readInt()); }
     private void floats(ObjectNode n, String... fields) throws IOException { for (String f : fields) n.put(f, number()); }
-    private void noSkinRequired() throws IOException { if (bool()) throw unsupported("skin-required bones/constraints"); }
+    private void skinRequired(ObjectNode node) throws IOException { node.put("skin",bool()); }
     private ObjectNode named(ArrayNode array, List<String> names) throws IOException {
         String name = required(text()); names.add(name); return array.addObject().put("name", name);
     }
@@ -127,7 +127,7 @@ final class Spine40Binary {
             if(family!=SpineVersion.V43)b.put("length",number());
             b.put("inherit", enumValue("normal", "onlyTranslation", "noRotationOrReflection", "noScale", "noScaleOrReflection"));
             if(family==SpineVersion.V43)b.put("length",number());
-            noSkinRequired(); if (nonessential) {
+            skinRequired(b); if (nonessential) {
                 b.put("color", color());
                 if(family.atLeast(SpineVersion.V42)){text();if(family==SpineVersion.V43){number();number();}bool();}
             }
@@ -151,8 +151,19 @@ final class Spine40Binary {
         for (int i = 0, n = count(); i < n; i++) {
             String name = required(family.atLeast(SpineVersion.V42)?text():ref()); var skin = skinArray.addObject().put("name", name);
             if(nonessential&&family.atLeast(SpineVersion.V42))color();
-            int lists=family==SpineVersion.V43?2:family==SpineVersion.V42?5:4;
-            for (int j = 0; j < lists; j++) if (count() != 0) throw unsupported("skin bones/constraints");
+            readMembers(skin,"bones",bones);
+            if(family==SpineVersion.V43) {
+                var all=new ArrayList<ObjectNode>();for(String kind:List.of("ik","transform","path","physics"))for(var c:root.path(kind))all.add((ObjectNode)c);
+                all.sort(Comparator.comparingInt(c->c.path("order").asInt()));
+                for(int j=0,size=count();j<size;j++) {
+                    var constraint=at(all,varint());
+                    for(String kind:List.of("ik","transform","path","physics"))for(var c:root.path(kind))
+                        if(c==constraint)skin.withArray(kind).add(c.path("name").asText());
+                }
+            } else for(String kind:family==SpineVersion.V42?List.of("ik","transform","path","physics"):List.of("ik","transform","path")) {
+                var names=new ArrayList<String>();for(var c:root.path(kind))names.add(c.path("name").asText());
+                readMembers(skin,kind,names);
+            }
             skin(skin, name, count());
         }
         // The editable model always has a default skin. Preserve binary indices separately.
@@ -181,7 +192,7 @@ final class Spine40Binary {
         var array = root.putArray(kind);
         for (int i = 0, n = count(); i < n; i++) {
             var c = array.addObject().put("name", required(text())).put("order", varint());
-            if(family!=SpineVersion.V42||kind.equals("path"))noSkinRequired(); var bs = c.putArray("bones");
+            if(family!=SpineVersion.V42||kind.equals("path"))skinRequired(c); var bs = c.putArray("bones");
             for (int j = 0, size = count(); j < size; j++) bs.add(at(bones, varint()));
             c.put("target", at(kind.equals("path") ? slots : bones, varint()));
             switch (kind) {
@@ -192,7 +203,7 @@ final class Spine40Binary {
                 }
                 case "transform" -> {
                     if(family==SpineVersion.V42){
-                        int flags=in.readUnsignedByte();if((flags&1)!=0)throw unsupported("skin-required transform");
+                        int flags=in.readUnsignedByte();c.put("skin",(flags&1)!=0);
                         c.put("local",(flags&2)!=0).put("relative",(flags&4)!=0);
                         optionalFloats(c,flags,3,"rotation","x","y","scaleX","scaleY");
                         optionalFloats(c,in.readUnsignedByte(),0,"shearY","mixRotate","mixX","mixY","mixScaleX","mixScaleY","mixShearY");
@@ -215,6 +226,9 @@ final class Spine40Binary {
         }
     }
 
+    private void readMembers(ObjectNode skin,String key,List<String> names)throws IOException {
+        var result=skin.putArray(key);for(int i=0,size=count();i<size;i++)result.add(at(names,varint()));
+    }
     private void skin(ObjectNode skin, String name, int slotCount) throws IOException {
         skins.add(name); var attachments = skin.putObject("attachments");
         for (int i = 0; i < slotCount; i++) {
@@ -258,7 +272,7 @@ final class Spine40Binary {
                 a.put("type", type == 1 ? "boundingbox" : type == 4 ? "path" : "clipping");
                 if (type == 4) a.put("closed", bool()).put("constantSpeed", bool());
                 if (type == 6) a.put("end", at(slots, varint()));
-                int size = count(); a.put("vertexCount", size); vertices(a, size, false);
+                int size = count(); a.put("vertexCount", size); vertices(a, size, type==4);
                 if (type == 4) floatArray(a.putArray("lengths"), size / 3);
                 if (nonessential) { String c = color(); if (type != 4) a.put("color", c); }
             }
@@ -508,7 +522,7 @@ final class Spine40Binary {
         node.put("rotateMode",at(List.of("tangent","chain","chainScale"),(flags>>3)&3));
     }
     private void ikFlags(ObjectNode node,boolean v43)throws IOException {
-        int flags=in.readUnsignedByte();if((flags&1)!=0)throw unsupported("skin-required IK");
+        int flags=in.readUnsignedByte();node.put("skin",(flags&1)!=0);
         if(v43&&(flags&2)!=0)throw unsupported("4.3 IK scaleY mode");
         node.put("bendPositive",v43?(flags&4)==0:(flags&2)!=0).put("compress",(flags&(v43?8:4))!=0).put("stretch",(flags&(v43?16:8))!=0);
         if(!v43)node.put("uniform",(flags&16)!=0);
@@ -521,7 +535,7 @@ final class Spine40Binary {
         }
     }
     private void physicsFields(ObjectNode c)throws IOException {
-        int flags=in.readUnsignedByte();if((flags&1)!=0)throw unsupported("skin-required physics");
+        int flags=in.readUnsignedByte();c.put("skin",(flags&1)!=0);
         optionalFloats(c,flags,1,"x","y","rotate","scaleX","shearX");
         if(family==SpineVersion.V43&&c.path("scaleX").asDouble()<0)throw unsupported("4.3 physics scaleY mode");
         c.put("limit",(flags&64)!=0?number():5000).put("fps",in.readUnsignedByte());
@@ -538,9 +552,9 @@ final class Spine40Binary {
             var ids=c.putArray("bones");for(int j=0,size=count();j<size;j++)ids.add(at(bones,varint()));
             c.put("target",at(type==1?slots:bones,varint()));
             if(type==0)ikFlags(c,true);
-            else if(type==1){int flags=in.readUnsignedByte();if((flags&1)!=0)throw unsupported("skin-required path");pathModes(c,flags>>1);if((flags&128)!=0)c.put("rotation",number());floats(c,"position","spacing","mixRotate","mixX","mixY");}
+            else if(type==1){int flags=in.readUnsignedByte();c.put("skin",(flags&1)!=0);pathModes(c,flags>>1);if((flags&128)!=0)c.put("rotation",number());floats(c,"position","spacing","mixRotate","mixX","mixY");}
             else {
-                int flags=in.readUnsignedByte();if((flags&1)!=0||(flags&16)!=0||((flags&2)!=0)!=((flags&4)!=0))throw unsupported("4.3 skin/clamp/mixed local transform");
+                int flags=in.readUnsignedByte();c.put("skin",(flags&1)!=0);if((flags&16)!=0||((flags&2)!=0)!=((flags&4)!=0))throw unsupported("4.3 skin/clamp/mixed local transform");
                 c.put("local",(flags&2)!=0).put("relative",(flags&8)!=0);boolean[] active=new boolean[6];
                 for(int j=0,size=flags>>5;j<size;j++) {
                     int from=in.readUnsignedByte();double offset=number();int count=in.readUnsignedByte();
@@ -569,15 +583,16 @@ final class Spine40Binary {
                 verticesKnown(a,size,true,weighted);floatArray(a.putArray("uvs"),size*2);
                 int faces=(size*2-a.path("hull").asInt()-2)*3;
                 if(faces<0||faces>budget)throw unsupported("triangle count");budget-=faces;
-                var triangles=a.putArray("triangles");for(int i=0;i<faces;i++)triangles.add(in.readUnsignedShort());
+                var triangles=a.putArray("triangles");for(int i=0;i<faces;i++)triangles.add(shortIndex());
                 orientTriangles(triangles,size,a.path("hull").asInt());
-                if(nonessential){var edges=a.putArray("edges");for(int i=0,n=count();i<n;i++)edges.add(in.readUnsignedShort());floats(a,"width","height");}
+                if(family==SpineVersion.V43 && count()!=0)throw unsupported("cross-slot mesh timelines");
+                if(nonessential){var edges=a.putArray("edges");for(int i=0,n=count();i<n;i++)edges.add(shortIndex());floats(a,"width","height");}
             }
             case 1,4,6->{
                 a.put("type",type==1?"boundingbox":type==4?"path":"clipping");
                 if(type==4)a.put("closed",(flags&16)!=0).put("constantSpeed",(flags&32)!=0);
                 if(type==6)a.put("end",at(slots,varint()));
-                int size=count();a.put("vertexCount",size);verticesKnown(a,size,false,(flags&(type==4?64:16))!=0);
+                int size=count();a.put("vertexCount",size);verticesKnown(a,size,type==4,(flags&(type==4?64:16))!=0);
                 if(type==4)floatArray(a.putArray("lengths"),size/3);
                 if(nonessential){String color=color();if(type!=4)a.put("color",color);}
             }
@@ -585,11 +600,16 @@ final class Spine40Binary {
         }
         return a;
     }
+    private int shortIndex() throws IOException {
+        int value=varint();if(value<0 || value>65535)throw unsupported("mesh uint16 index");return value;
+    }
     private void verticesKnown(ObjectNode a,int size,boolean allowWeights,boolean weighted)throws IOException {
         if(size<0||size>io.github.samlinb.openbone.core.math.MeshTopology.MAX_VERTICES)throw unsupported("vertex count");
         var values=a.putArray("vertices");
         if(!weighted){floatArray(values,size*2);return;}
         if(!allowWeights)throw unsupported("weighted "+a.path("type").asText());
-        for(int i=0;i<size;i++){int n=count();values.add(n);for(int j=0;j<n;j++){int b=varint();at(bones,b);values.add(b);floatArray(values,3);}}
+        int expected=family==SpineVersion.V43?count():-1,entries=0;
+        for(int i=0;i<size;i++){int n=count();entries+=1+n;values.add(n);for(int j=0;j<n;j++){int b=varint();at(bones,b);values.add(b);floatArray(values,3);}}
+        if(expected>=0 && entries!=expected)throw unsupported("weighted bone array length");
     }
 }

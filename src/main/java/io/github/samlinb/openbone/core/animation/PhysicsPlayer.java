@@ -123,7 +123,7 @@ public final class PhysicsPlayer {
     private void step(DocumentSnapshot d, EntityId clip, int frame, PhysicsSolver.Mode mode) {
         var transaction = new PhysicsFrame(mode, states, frame);
         ConstraintSolver.evaluate(d.bones(), pose(d, clip, frame / 60.0),
-                d.animations().isEmpty() ? d.constraints() : AnimationSampler.constraints(d, clip, frame / 60.0, false),
+                d.activeConstraints(d.animations().isEmpty() ? d.constraints() : AnimationSampler.constraints(d, clip, frame / 60.0, false)),
                 d.slots(), d.attachments(), transaction);
         states = transaction.snapshot();
         evaluations++;

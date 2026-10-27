@@ -48,7 +48,7 @@ public final class EditorMcpTools {
         ArrayNode tools = JSON.createArrayNode();
         add(tools, "openbone_get_context", "Read the current live project summary, selection, view and revision. Query scene for IDs and keyframes.", schema("{}"), true);
         add(tools, "openbone_query_scene", AnimationMcpQueries.message("description"), schema("""
-            {"kind":{"enum":["bones","animations","keyframes","slots","attachments","constraints"]},
+            {"kind":{"enum":["bones","animations","keyframes","slots","attachments","constraints","skins"]},
              "animationId":{"type":"string"},"boneId":{"type":"string"},"expectedRevision":{"type":"string"},
              "trackType":{"enum":["bone","non_bone","all","deform","constraint","slot_color","attachment","draw_order","event"]},
              "targetId":{"type":"string"},"channel":{"type":"string","minLength":1,"maxLength":64},
@@ -160,6 +160,7 @@ public final class EditorMcpTools {
         data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",true,"cleanPreview",true,"atomicEdits",true,"nonBoneKeyframeQuery",true,"nonBoneKeyframeEdits",true));
         data.put("spineIO",Map.of("versions",io.github.samlinb.openbone.io.SpineVersion.exportVersions(),"formats",List.of("JSON","BINARY","NATIVE"),"nativeCliConfigured",io.github.samlinb.openbone.io.SpineCliBridge.configured()));
         data.put("dirty", h.isDirty());
+        data.put("activeSkin", d.resources().activeSkin());
         data.put("busy", h.isPreviewing());
         data.put("selection", h.state().selection().ids().stream().map(EntityId::value).toList());
         data.put("selectedKeyIds", h.state().keySelection().stream().map(EntityId::value).toList());
@@ -186,8 +187,11 @@ public final class EditorMcpTools {
         switch (text(a, "kind", 32)) {
             case "bones" -> {
                 total = d.bones().size();
+                var activeBones = d.activeBones();
                 rows = d.bones().stream().map(b -> {
                 var row = JSON.createObjectNode().put("id", b.id().value()).put("name", b.name()).put("length", b.length()).put("inherit", b.inherit().name());
+                row.put("skinRequired", d.resources().activation().requiredBones().contains(b.id()));
+                row.put("skinActive", activeBones.contains(b.id()));
                 if (b.parentId() == null) row.putNull("parentId"); else row.put("parentId", b.parentId().value());
                 row.set("setup", JSON.valueToTree(b.local())); return row;
                 });
@@ -222,8 +226,26 @@ public final class EditorMcpTools {
                     return JSON.valueToTree(t instanceof RegionAttachment r ? Map.of("id",r.id().value(),"name",r.name(),"slotId",r.slotId().value(),"type","RegionAttachment","source",r.source(),"setup",r.local(),"width",r.width(),"height",r.height()) : Map.of("id",t.id().value(),"name",t.name(),"slotId",t.slotId().value(),"type",t.getClass().getSimpleName()));
                 });
             }
-            case "constraints" -> { total = d.constraints().size(); rows = d.constraints().stream().map(JSON::valueToTree); }
-            default -> throw new IllegalArgumentException("Unknown kind. Use bones, animations, keyframes, slots, attachments or constraints.");
+            case "constraints" -> {
+                total = d.constraints().size();
+                var active = d.activeConstraints(d.constraints()).stream().map(Constraint::id).collect(java.util.stream.Collectors.toSet());
+                rows = d.constraints().stream().map(c -> {
+                    ObjectNode row = JSON.valueToTree(c);
+                    row.put("skinRequired", d.resources().activation().requiredConstraints().contains(c.id()));
+                    row.put("skinActive", active.contains(c.id())); return row;
+                });
+            }
+            case "skins" -> {
+                total = d.skins().size();
+                rows = d.skins().stream().map(s -> {
+                    var members = d.resources().activation().skins().getOrDefault(s.name(), SkinActivation.Members.EMPTY);
+                    var row = JSON.createObjectNode().put("name", s.name()).put("active", s.name().equals(d.resources().activeSkin()));
+                    row.set("boneIds", JSON.valueToTree(members.bones().stream().map(EntityId::value).sorted().toList()));
+                    row.set("constraintIds", JSON.valueToTree(members.constraints().stream().map(EntityId::value).sorted().toList()));
+                    return row;
+                });
+            }
+            default -> throw new IllegalArgumentException("Unknown kind. Use bones, animations, keyframes, slots, attachments, constraints or skins.");
         }
         var items = rows.skip(offset).limit(limit).toList();
         long next = Math.min((long) offset + items.size(), total);

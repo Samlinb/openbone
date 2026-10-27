@@ -46,6 +46,6 @@ public final class ImageResources {
         ids.forEach(atlas::remove); // Replacement is an independent logical image, not a packed page.
         var resources=document.resources();
         return new DocumentSnapshot(document.bones(),document.slots(),attachments,document.animations(),document.constraints(),
-                new Resources(resources.skins(),resources.activeSkin(),resources.events(),atlas,resources.metadata()));
+                new Resources(resources.skins(),resources.activeSkin(),resources.events(),atlas,resources.metadata(),resources.activation()));
     }
 }

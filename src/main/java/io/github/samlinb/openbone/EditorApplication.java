@@ -12,7 +12,7 @@ public final class EditorApplication {
     }
 
     public static String version() {
-        try (var input = EditorApplication.class.getResourceAsStream("/META-INF/maven/io.github.samlinb.openbone/openbone/pom.properties")) {
+        try (var input = EditorApplication.class.getResourceAsStream("/META-INF/maven/io.github.samlinb.openbone/OpenBone/pom.properties")) {
             if (input == null) return "dev";
             var properties = new java.util.Properties(); properties.load(input);
             return properties.getProperty("version", "dev");

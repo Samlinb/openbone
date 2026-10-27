@@ -282,6 +282,7 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
         }
         // Finite local data can still overflow when composed. Reject before entering
         // editable state.
+        resources.activation().validate(bones, constraints, resources.skins());
         WorldPose.evaluate(bones, slots, attachments, Map.of(), Map.of(), constraints);
         validateAnimationBounds(bones, slots, attachments,
                 animations.isEmpty() ? migratedAnimation(bones, slots, attachments) : animations, constraints);
@@ -561,7 +562,7 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                                                 Math.abs(i.point().y()) + offsets[index++], "skin setup+deform y");
                                 double bound = positionNormBound(w[0], w[1], x, y,
                                         "animation influence intermediate bound");
-                                sum = io.github.samlinb.openbone.core.math.Finite.require(sum + bound * i.weight(),
+                                sum = io.github.samlinb.openbone.core.math.Finite.require(sum + bound * Math.abs(i.weight()),
                                         "animation skin sum bound");
                             }
                         }
@@ -710,11 +711,13 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             double phase = AnimationSampler.sampleTime(time, animation.duration(), loop);
             for (var t : animation.discrete().colors()) colors.put(t.slotId(), t.sample(colors.get(t.slotId()), phase));
         }
+        var activeBones = activeBones();
         for (var s : slots) {
             String name = names.get(s.id());
             EntityId id = name == null ? null : current.find(s.id(), name);
             if (id == null && name != null)
                 id = fallback.find(s.id(), name);
+            if (!activeBones.contains(s.boneId())) id = null;
             byId.put(s.id(), s.withActiveAttachment(id).withColor(colors.get(s.id())));
         }
         return order.stream().map(byId::get).toList();
@@ -736,15 +739,23 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
         return new WorldPose(pose.bones(), regions, pose.meshes(), pose.clips(), pose.paths(), evaluated, pose.bounds());
     }
 
+    public Set<EntityId> activeBones() {
+        return resources.activation().activeBones(bones, resources.activeSkin());
+    }
+
+    public List<Constraint> activeConstraints(List<Constraint> values) {
+        return resources.activation().activeConstraints(values, slots, activeBones(), resources.activeSkin());
+    }
+
     public WorldPose evaluateWorld() {
         var evaluated = resolvedSlots(null, 0, false);
-        return decorate(WorldPose.evaluate(bones, evaluated, attachments, Map.of(), Map.of(), constraints), evaluated);
+        return decorate(WorldPose.evaluate(bones, evaluated, attachments, Map.of(), Map.of(), activeConstraints(constraints)), evaluated);
     }
 
     /** Pose overrides remain separate from setup; unknown bone IDs are rejected. */
     public WorldPose evaluateWorld(Map<EntityId, io.github.samlinb.openbone.core.math.Transform> pose) {
         var evaluated = resolvedSlots(null, 0, false);
-        return decorate(WorldPose.evaluate(bones, evaluated, attachments, Map.copyOf(pose), Map.of(), constraints),
+        return decorate(WorldPose.evaluate(bones, evaluated, attachments, Map.copyOf(pose), Map.of(), activeConstraints(constraints)),
                 evaluated);
     }
 
@@ -752,14 +763,14 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
             Map<EntityId, List<Double>> deforms) {
         var evaluated = resolvedSlots(null, 0, false);
         return decorate(
-                WorldPose.evaluate(bones, evaluated, attachments, Map.copyOf(pose), Map.copyOf(deforms), constraints),
+                WorldPose.evaluate(bones, evaluated, attachments, Map.copyOf(pose), Map.copyOf(deforms), activeConstraints(constraints)),
                 evaluated);
     }
 
     public WorldPose evaluateAnimatedWorld(EntityId clip, double time, boolean loop) {
         var evaluated = resolvedSlots(clip, time, loop);
         return decorate(WorldPose.evaluate(bones, evaluated, attachments, AnimationSampler.pose(this, clip, time, loop),
-                AnimationSampler.deforms(this, clip, time, loop), AnimationSampler.constraints(this, clip, time, loop)),
+                AnimationSampler.deforms(this, clip, time, loop), activeConstraints(AnimationSampler.constraints(this, clip, time, loop))),
                 evaluated);
     }
 
@@ -770,7 +781,7 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
                 WorldPose
                         .evaluate(bones, evaluated, attachments, AnimationSampler.pose(this, clip, time, false),
                                 AnimationSampler.deforms(this, clip, time, false),
-                                AnimationSampler.constraints(this, clip, time, false),
+                                activeConstraints(AnimationSampler.constraints(this, clip, time, false)),
                                 new io.github.samlinb.openbone.core.math.PhysicsFrame(
                                         io.github.samlinb.openbone.core.math.PhysicsSolver.Mode.POSE, states)),
                 evaluated);
@@ -782,7 +793,7 @@ public record DocumentSnapshot(List<Bone> bones, List<Slot> slots, List<Attachme
         var evaluated = resolvedSlots(null, 0, false);
         return decorate(
                 WorldPose
-                        .evaluate(bones, evaluated, attachments, Map.copyOf(pose), Map.copyOf(deforms), constraints,
+                        .evaluate(bones, evaluated, attachments, Map.copyOf(pose), Map.copyOf(deforms), activeConstraints(constraints),
                                 new io.github.samlinb.openbone.core.math.PhysicsFrame(
                                         io.github.samlinb.openbone.core.math.PhysicsSolver.Mode.POSE, states)),
                 evaluated);

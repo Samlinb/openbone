@@ -103,7 +103,7 @@ public record PathAttachment(EntityId id, String name, EntityId slotId, List<Vec
                 double x=Finite.require(Math.abs(influence.point().x())+deform[cursor++],"path influence bound");
                 double y=Finite.require(Math.abs(influence.point().y())+deform[cursor++],"path influence bound");
                 double point=positionBound(bone[0],bone[1],x,y);
-                sum=Finite.require(Math.nextUp((sum+point*influence.weight())*(1+1e-14)+8*Double.MIN_VALUE),"path skin bound");
+                sum=Finite.require(Math.nextUp((sum+point*Math.abs(influence.weight()))*(1+1e-14)+8*Double.MIN_VALUE),"path skin bound");
             }
             bound=Math.max(bound,sum);
         }

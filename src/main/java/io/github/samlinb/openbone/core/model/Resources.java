@@ -7,7 +7,11 @@ import java.util.*;
  * skin.
  */
 public record Resources(List<Skin> skins, String activeSkin, List<EventDefinition> events,
-        Map<EntityId, AtlasRegion> atlas, SpineMetadata metadata) {
+        Map<EntityId, AtlasRegion> atlas, SpineMetadata metadata, SkinActivation activation) {
+    public Resources(List<Skin> skins, String activeSkin, List<EventDefinition> events,
+            Map<EntityId, AtlasRegion> atlas, SpineMetadata metadata) {
+        this(skins, activeSkin, events, atlas, metadata, SkinActivation.EMPTY);
+    }
     public Resources(List<Skin> skins, String activeSkin, List<EventDefinition> events, Map<EntityId, AtlasRegion> atlas) {
         this(skins, activeSkin, events, atlas, SpineMetadata.EMPTY);
     }
@@ -19,10 +23,11 @@ public record Resources(List<Skin> skins, String activeSkin, List<EventDefinitio
         atlas = Map.copyOf(atlas);
         Objects.requireNonNull(activeSkin);
         Objects.requireNonNull(metadata);
+        Objects.requireNonNull(activation);
     }
 
     public Resources skin(String name) {
-        return new Resources(skins, name, events, atlas, metadata);
+        return new Resources(skins, name, events, atlas, metadata, activation);
     }
 
     public Resources retain(Set<EntityId> removed) {
@@ -43,8 +48,8 @@ public record Resources(List<Skin> skins, String activeSkin, List<EventDefinitio
         }
         var regions = new HashMap<>(atlas);
         regions.keySet().removeAll(removed);
-        return new Resources(next, activeSkin, events, regions, metadata.retain(removed));
+        return new Resources(next, activeSkin, events, regions, metadata.retain(removed), activation.retain(removed));
     }
 
-    public Resources withMetadata(SpineMetadata value) { return new Resources(skins, activeSkin, events, atlas, value); }
+    public Resources withMetadata(SpineMetadata value) { return new Resources(skins, activeSkin, events, atlas, value, activation); }
 }

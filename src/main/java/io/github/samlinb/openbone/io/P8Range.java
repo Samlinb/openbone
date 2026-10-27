@@ -19,7 +19,7 @@ final class P8Range {
             throw ProjectCodec.bad("P8.clip",
                     "Discrete attachment/draw-order combined with clipping requires a new float topology proof; project remains lossless");
         if (d.skins().size() > 1 && d.attachments().stream()
-                .anyMatch(a -> a instanceof PathAttachment || a instanceof ClippingAttachment))
+                .anyMatch(a -> a instanceof ClippingAttachment))
             throw ProjectCodec.bad("P8.skin",
                     "Multi-skin path/clipping geometry requires per-skin constraint/topology proof; project remains lossless");
         for (var c : d.constraints())

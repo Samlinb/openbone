@@ -91,7 +91,7 @@ public final class ModelEdits {
             var attachments = new ArrayList<>(d.attachments());
             attachments.add(attachment);
             var next = new DocumentSnapshot(d.bones(), d.slots(), attachments, d.animations(), d.constraints(),
-                    new Resources(skins, d.resources().activeSkin(), d.resources().events(), d.resources().atlas(), d.resources().metadata()));
+                    new Resources(skins, d.resources().activeSkin(), d.resources().events(), d.resources().atlas(), d.resources().metadata(), d.resources().activation()));
             return makeActive ? editSlot(next, attachment.slotId(), s -> s.withActiveAttachment(attachment.id()))
                     : next;
         }

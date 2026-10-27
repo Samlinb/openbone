@@ -24,6 +24,7 @@ final class P8ProjectJson {
     static void writeResources(ObjectNode root, DocumentSnapshot d) {
         var r = root.putObject("resources").put("activeSkin", d.resources().activeSkin());
         if (!d.resources().metadata().equals(SpineMetadata.EMPTY)) SpineMetadataJson.writeProject(r.putObject("metadata"), d.resources().metadata());
+        if (!d.resources().activation().equals(SkinActivation.EMPTY)) SkinActivationJson.writeProject(r.putObject("activation"), d.resources().activation());
         var skins = r.putArray("skins");
         for (var skin : d.resources().skins()) {
             var s = skins.addObject().put("name", skin.name());
@@ -51,7 +52,13 @@ final class P8ProjectJson {
     static Resources readResources(JsonNode root) throws ProjectFormatException {
         var r = root.get("resources");
         String p = "$.resources";
-        if (root.path("schemaVersion").asInt() >= 9 && r.has("metadata")) fields(r, p, "activeSkin", "skins", "events", "atlas", "metadata");
+        if (root.path("schemaVersion").asInt() >= 12) {
+            var keys = new ArrayList<>(List.of("activeSkin", "skins", "events", "atlas"));
+            if (r.has("metadata")) keys.add("metadata");
+            if (r.has("activation")) keys.add("activation");
+            fields(r, p, keys.toArray(String[]::new));
+        }
+        else if (root.path("schemaVersion").asInt() >= 9 && r.has("metadata")) fields(r, p, "activeSkin", "skins", "events", "atlas", "metadata");
         else fields(r, p, "activeSkin", "skins", "events", "atlas");
         var skins = new ArrayList<Skin>();
         for (var s : array(r, "skins", p)) {
@@ -85,7 +92,8 @@ final class P8ProjectJson {
                 throw bad(p, "Duplicate atlas attachment");
         }
         return new Resources(skins, text(r, "activeSkin", p), events, atlas,
-                r.has("metadata") ? SpineMetadataJson.readProject(r.get("metadata")) : SpineMetadata.EMPTY);
+                r.has("metadata") ? SpineMetadataJson.readProject(r.get("metadata")) : SpineMetadata.EMPTY,
+                r.has("activation") ? SkinActivationJson.readProject(r.get("activation")) : SkinActivation.EMPTY);
     }
 
     static void writeTracks(ObjectNode node, DiscreteTracks tracks) {

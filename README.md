@@ -143,6 +143,9 @@ Auto-recovery and layout data live in `%LOCALAPPDATA%/Openbone` on Windows by de
 
 File → Open also accepts `.spine`. A separately configured licensed Spine CLI converts actual native project data; without it, OpenBone may load a matching exported JSON snapshot and explicitly warn that it can be older than the project. Native object graphs and editor-only state are not independently decoded. The local Trial installation cannot verify native conversion. See [Spine version compatibility](docs/SPINE_VERSION_COMPATIBILITY.md) for configuration, source analysis and acceptance limits.
 
+Hero example loading has been verified with the matching official `4.3.75-beta` JSON snapshot: 44 bones, 31 slots, 30 attachments, three skins and 12 animations. Skin-controlled bones/constraints and finite signed skin weights are retained in project schema 12. Sword/morningstar switching, actual OpenGL previews, keyframe editing, undo and portable reopen are covered by `HeroMcpDesktopTest` (`-Dopenbone.hero=true -Dopenbone.verifyGl=true`). Native object graphs are not decoded; JSON and binary export retain activation, signed weights and supported weighted paths; native conversion still requires the configured licensed CLI. Hero assets stay local because their demonstration license prohibits redistribution.
+
+
 1. Prepare exported JSON or skel at version `3.8.x`, `4.0.x`, `4.1.x`, `4.2.x` or `4.3.x` that fits the compatibility scope above.
 2. Place the same-named `.atlas` and its referenced PNGs in position; when using individual images, keep `skeleton.images` and attachment paths resolvable. Relative resource paths must stay inside the imported resource directory.
 3. Choose "File → Import Spine Data…" and select the skeleton JSON or supported binary export. You may also select `current.json` from an Openbone export asset pack; the editor will parse and validate the pack.
