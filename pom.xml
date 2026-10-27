@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>io.github.samlinb.openbone</groupId>
   <artifactId>OpenBone</artifactId>
-  <version>1.0.0</version>
+  <version>1.0.1</version>
   <name>OpenBone</name>
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
