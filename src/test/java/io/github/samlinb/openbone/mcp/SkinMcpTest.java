@@ -24,6 +24,24 @@ class SkinMcpTest {
         SwingUtilities.invokeAndWait(()->protocol.host.installProject(new ProjectDocument(model))); protocol.start();
     }
     @AfterEach void stop() { if(protocol!=null && protocol.server!=null)protocol.close(); }
+    @Test void skinQueryReportsSetupCoverageAndSelectionRevealsImportedBody() throws Exception {
+        var root=model.bones().get(0).id();
+        var slot=EntityId.create();var attachment=EntityId.create();
+        var region=new RegionAttachment(attachment,"body",slot,"body.png",Transform.IDENTITY,10,10);
+        var source=new DocumentSnapshot(model.bones(),List.of(new Slot(slot,"body",root,attachment)),
+                List.of(region),List.of(),List.of(),new Resources(List.of(new Skin("default",Map.of()),
+                        new Skin("body-skin",Map.of(slot,Map.of("body",attachment)))),"default",List.of(),Map.of(),
+                        SpineMetadata.EMPTY,SkinActivation.EMPTY));
+        SwingUtilities.invokeAndWait(()->protocol.host.installProject(new ProjectDocument(source)));
+        assertNull(source.resolvedSlots(null,0,false).get(0).activeAttachmentId());
+        var skins=protocol.ok("openbone_query_scene",Map.of("kind","skins"));
+        assertEquals(0,skins.path("items").get(0).path("setupAttachmentMatches").asInt());
+        assertEquals(1,skins.path("items").get(1).path("setupAttachmentMatches").asInt());
+        assertEquals(1,skins.path("items").get(1).path("attachmentCount").asInt());
+        protocol.ok("openbone_apply_edits",Map.of("requestId","body-skin","expectedRevision",protocol.revision(),
+                "edits",List.of(Map.of("op","set_skin","name","body-skin"))));
+        assertEquals(attachment,protocol.host.history.state().model().resolvedSlots(null,0,false).get(0).activeAttachmentId());
+    }
     @Test void querySelectionRetryConflictAtomicFailureAndUndoUseSharedHistory() throws Exception {
         var skins=protocol.ok("openbone_query_scene",Map.of("kind","skins","offset",1,"limit",1));
         assertEquals(2,skins.path("total").asInt()); assertEquals("weapon",skins.path("items").get(0).path("name").asText());

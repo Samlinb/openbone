@@ -97,7 +97,7 @@ class HeroImportTest {
         var selected = ExtendedEdits.skin(d,"weapon/morningstar");
         document.history().execute("Select weapon",Commands.model(ignored -> selected));
         Path saved=temp.resolve("hero.openbone.json"); document.savePortable(saved);
-        assertEquals(12,new ProjectCodec().parseTree(Files.readAllBytes(saved)).path("schemaVersion").asInt());
+        assertEquals(13,new ProjectCodec().parseTree(Files.readAllBytes(saved)).path("schemaVersion").asInt());
         var reopened=new ProjectDocument(DocumentSnapshot.EMPTY); reopened.openResolved(saved);
         assertEquals(selected.resources().activation(),reopened.history().state().model().resources().activation());
         assertEquals(selected.animations(),reopened.history().state().model().animations());

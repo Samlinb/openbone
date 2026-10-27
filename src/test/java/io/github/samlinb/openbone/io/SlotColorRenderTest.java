@@ -68,6 +68,19 @@ class SlotColorRenderTest {
                 assertEquals(Math.round(255*.6*.25*effective),(pixel>>>8)&255,2);
                 assertEquals(Math.round(255*.4*effective),pixel&255,2);
             }
+            // PMA pixels retain RGB even at zero texture alpha (emissive/additive
+            // artwork). Unpremultiplying here would irreversibly erase that light.
+            var pma=new Pixmap(1,1,Pixmap.Format.RGBA8888); pma.setBlending(Pixmap.Blending.None);
+            pma.drawPixel(0,0,0x64321900); textures.put("pma",new Texture(pma)); pma.dispose();
+            for(double alpha:new double[]{0,.5,1}) {
+                clear(0,0,0);
+                TexturedScene.draw(batch,List.of(new VisibleGeometry.Draw(id,id,"pma",geometry,Slot.Blend.NORMAL,
+                        new Rgba(.5,.25,1,alpha),true)),textures::get,v->v);
+                int pixel=read().getRGB(W/2,H/2);
+                assertEquals(Math.round(100*.5*alpha),(pixel>>>16)&255,2);
+                assertEquals(Math.round(50*.25*alpha),(pixel>>>8)&255,2);
+                assertEquals(Math.round(25*alpha),pixel&255,2);
+            }
             for(String extension:List.of("json","atlas","png")) try(var in=getClass().getResourceAsStream("/spine38/dandao_1."+extension)) { Files.copy(in,temp.resolve("dandao_1."+extension)); }
             var d=new SkeletonJsonCodec().read(temp.resolve("dandao_1.json"));
             new io.github.samlinb.openbone.application.ProjectDocument(d).savePortable(Path.of("target/dandao-color-project.json"));
@@ -106,10 +119,37 @@ class SlotColorRenderTest {
             }
             canvas.dispose();Path target=Path.of("target/dandao-color-preview.png");Files.createDirectories(target.getParent());ImageIO.write(sheet,"PNG",target.toFile());
             if(Boolean.getBoolean("openbone.spineboy")) renderSpineboy(batch,textures);
+            if(System.getProperty("openbone.shipProject")!=null) renderShip(batch,textures,Path.of(System.getProperty("openbone.shipProject")));
         } finally {
             if(batch!=null) batch.dispose(); textures.values().forEach(Texture::dispose); buffer.destroy();
             Gdx.gl=oldGl;Gdx.gl20=oldGl20;Gdx.graphics=oldGraphics;Gdx.app=oldApp;
         }
+    }
+    static void renderShip(PolygonSpriteBatch batch,Map<String,Texture> textures,Path project) throws Exception {
+        var d=ResourcePaths.absolute(new ProjectCodec().read(project),project.toAbsolutePath().getParent());
+        var clip=d.animations().stream().filter(a->a.name().equals("Standby")).findFirst().orElseThrow();
+        var dark=VisibleGeometry.evaluate(d,AnimationSampler.world(d,clip.id(),0,false));
+        var hull=dark.stream().filter(draw->d.attachment(draw.attachmentId()).name().equals("finsh_ship")).findFirst().orElseThrow();
+        assertEquals(new Rgba(0,0,0,1),hull.color(),"Standby intentionally starts with a black slot tint");
+        var draws=VisibleGeometry.evaluate(d,AnimationSampler.world(d,clip.id(),2,false));
+        var brightHull=draws.stream().filter(draw->d.attachment(draw.attachmentId()).name().equals("finsh_ship")).findFirst().orElseThrow();
+        assertEquals(Rgba.WHITE,brightHull.color(),"Standby reaches the white slot tint after 1.6667 seconds");
+        for(var draw:draws) if(!textures.containsKey(draw.source())) {
+            var image=ImageAssets.readPng(Path.of(draw.source()));
+            var pixels=new Pixmap(image.getWidth(),image.getHeight(),Pixmap.Format.RGBA8888);pixels.setBlending(Pixmap.Blending.None);
+            for(int y=0;y<image.getHeight();y++) for(int x=0;x<image.getWidth();x++) {int argb=image.getRGB(x,y);pixels.drawPixel(x,y,(argb<<8)|(argb>>>24));}
+            var texture=new Texture(pixels);pixels.dispose();texture.setFilter(Texture.TextureFilter.Nearest,Texture.TextureFilter.Nearest);textures.put(draw.source(),texture);
+        }
+        double minX=Double.POSITIVE_INFINITY,minY=minX,maxX=Double.NEGATIVE_INFINITY,maxY=maxX;
+        for(var draw:draws) for(var v:draw.geometry().vertices()) {minX=Math.min(minX,v.x());minY=Math.min(minY,v.y());maxX=Math.max(maxX,v.x());maxY=Math.max(maxY,v.y());}
+        final double scale=Math.min((W-30)/(maxX-minX),(H-30)/(maxY-minY)),cx=(minX+maxX)/2,cy=(minY+maxY)/2;
+        clear(25/255f,31/255f,39/255f);
+        TexturedScene.draw(batch,draws,textures::get,v->new Vec2(W/2.+(v.x()-cx)*scale,H/2.+(v.y()-cy)*scale));
+        var image=read();ImageIO.write(image,"PNG",Path.of("target/ship-real-gl.png").toFile());
+        int brown=0;
+        for(int y=0;y<H;y++) for(int x=0;x<W;x++) {int pixel=image.getRGB(x,y);int r=(pixel>>>16)&255,g=(pixel>>>8)&255,b=pixel&255;if(r>50 && g>20 && r>g*1.3 && b<g) brown++;}
+        System.out.println("SHIP REAL GL brownPixels="+brown);
+        assertTrue(brown>500,"Ship hull and cards must retain brown colored artwork, not black silhouettes");
     }
     static void renderSpineboy(PolygonSpriteBatch batch,Map<String,Texture> textures) throws Exception {
         Path project=Path.of("target/spineboy-openbone/spineboy-pro.json").toAbsolutePath();

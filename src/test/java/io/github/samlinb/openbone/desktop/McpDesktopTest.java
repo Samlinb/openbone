@@ -379,6 +379,136 @@ class McpDesktopTest {
         }
         fail("MCP automatic startup timed out");
     }
+
+    @Test void nativeMp4UsesActualLiveGlFramesAndMatchesItsPosterCapture() throws Exception {
+        Path ffmpeg=Path.of("D:/Program Files/Python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe");
+        Assumptions.assumeTrue(Files.isRegularFile(ffmpeg));
+        String oldState=System.getProperty("openbone.userState"),oldPort=System.getProperty("openbone.mcp.port"),oldEncoder=System.getProperty("openbone.ffmpeg");
+        System.setProperty("openbone.userState",temp.resolve("media-state").toString());System.setProperty("openbone.mcp.port","0");System.setProperty("openbone.ffmpeg",ffmpeg.toString());
+        McpConnectionSettings.save(McpConnectionSettings.path(),new McpConnectionSettings.State(39871,true,""));
+        try {
+            Path project=Path.of("res/hero/character.json").toAbsolutePath();
+            edt(()->{frame=new EditorFrame(project);frame.setSize(1200,850);frame.showEditor();return null;});
+            awaitMcpStarted();edt(()->{url=((EditorMcpServer)field("mcpServer")).url();token=(String)field("mcpToken");return null;});
+            var model=edt(()->frame.history().state().model());var clip=model.animations().stream().filter(a->a.name().equals("run")).findFirst().orElseThrow();
+            String revision=data(call("openbone_get_context",Map.of())).path("revision").asText();
+            Path directory=temp.resolve("real-gl-media");
+            var started=data(call("openbone_render_animation",Map.of("directory",directory.toString(),"animationId",clip.id().value(),"fps",24,"fit",true,"fitTime",clip.duration()*.5,"expectedRevision",revision,"requestId","real-gl-media")));
+            String job=started.path("jobId").asText();JsonNode result=null;
+            for(int i=0;i<12;i++){result=data(call("openbone_render_status",Map.of("jobId",job,"waitMs",5000)));if(Set.of("COMPLETE","FAILED","CANCELLED").contains(result.path("status").asText()))break;}
+            assertEquals("COMPLETE",result.path("status").asText(),result.toString());
+            assertEquals((int)Math.ceil(clip.duration()*24)+1,result.path("decodedFrameCount").asInt());
+            assertTrue(result.path("uniqueFrameCount").asInt()>1);
+            var capture=call("openbone_capture_preview",Map.of("animationId",clip.id().value(),"time",clip.duration()*.5,"expectedRevision",revision,"fit",false,"showBones",false,"showGrid",false));
+            BufferedImage live=image(capture),poster=ImageIO.read(directory.resolve("preview.png").toFile());
+            assertEquals(live.getWidth(),poster.getWidth());assertEquals(live.getHeight(),poster.getHeight());
+            long changed=0;int foreground=0,bg=poster.getRGB(0,0);
+            for(int y=0;y<poster.getHeight();y++)for(int x=0;x<poster.getWidth();x++){if(live.getRGB(x,y)!=poster.getRGB(x,y))changed++;if(poster.getRGB(x,y)!=bg)foreground++;}
+            assertEquals(0,changed,"Native poster must equal the production MCP GL capture at the same fixed camera/time");assertTrue(foreground>1000);
+            var first=image(call("openbone_capture_preview",Map.of("animationId",clip.id().value(),"time",0,
+                    "expectedRevision",revision,"fit",false,"showBones",false,"showGrid",false)));
+            var decoder=new ProcessBuilder(ffmpeg.toString(),"-hide_banner","-loglevel","error","-nostdin",
+                    "-i",directory.resolve("animation.mp4").toString(),"-frames:v","1","-f","rawvideo","-pix_fmt","rgb24","pipe:1")
+                    .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+            byte[] pixels=decoder.getInputStream().readAllBytes();assertTrue(decoder.waitFor(15,TimeUnit.SECONDS));assertEquals(0,decoder.exitValue());
+            int encodedWidth=result.path("encodedWidth").asInt(),encodedHeight=result.path("encodedHeight").asInt();
+            assertEquals(encodedWidth*encodedHeight*3,pixels.length);long colorError=0;
+            for(int y=0;y<first.getHeight();y++)for(int x=0;x<first.getWidth();x++){
+                int rgb=first.getRGB(x,y),offset=(y*encodedWidth+x)*3;
+                colorError+=Math.abs(((rgb>>>16)&255)-(pixels[offset]&255))+Math.abs(((rgb>>>8)&255)-(pixels[offset+1]&255))+Math.abs((rgb&255)-(pixels[offset+2]&255));
+            }
+            assertTrue(colorError/(double)(first.getWidth()*first.getHeight()*3)<8,"Decoded H264 frame must match the actual t=0 GL capture within compression tolerance");
+            Path evidence=Path.of("target/native-media-real-gl");Files.createDirectories(evidence);
+            for(String file:List.of("animation.mp4","preview.png","proof.json"))Files.copy(directory.resolve(file),evidence.resolve(file),StandardCopyOption.REPLACE_EXISTING);
+            assertEquals(revision,data(call("openbone_get_context",Map.of())).path("revision").asText());
+            // A large root translation must fit the action's extent once rather
+            // than following the actor or cropping its first and last poses.
+            String travel=UUID.randomUUID().toString();String root=model.bones().get(0).id().value();
+            var edited=data(call("openbone_apply_edits",Map.of("expectedRevision",revision,"requestId","media-travel-clip","edits",List.of(
+                    Map.of("op","create_animation","animationId",travel,"name","media-travel"),
+                    Map.of("op","put_keyframe","animationId",travel,"boneId",root,"channel","TRANSLATE","time",0,"values",List.of(0,0)),
+                    Map.of("op","put_keyframe","animationId",travel,"boneId",root,"channel","TRANSLATE","time",1,"values",List.of(1000,0))))));
+            String travelRevision=edited.path("revision").asText();
+            var travelStart=data(call("openbone_render_animation",Map.of("directory",temp.resolve("travel-media").toString(),"animationId",travel,"fps",24,"fit",true,"expectedRevision",travelRevision,"requestId","travel-media")));
+            JsonNode travelResult=null;
+            for(int i=0;i<12;i++){travelResult=data(call("openbone_render_status",Map.of("jobId",travelStart.path("jobId").asText(),"waitMs",5000)));if(Set.of("COMPLETE","FAILED","CANCELLED").contains(travelResult.path("status").asText()))break;}
+            assertEquals("COMPLETE",travelResult.path("status").asText(),travelResult.toString());
+            assertEquals(25,travelResult.path("nonEmptyFrameCount").asInt());
+            assertEquals(0,travelResult.path("framesTouchingImageEdge").asInt(),"A fixed camera fitted to the motion range must preserve both endpoint poses");
+        } finally {
+            if(frame!=null)edt(()->{if(frame.isDisplayable()){frame.history().markSaved();invoke("closeRequested");}return null;});
+            restore("openbone.userState",oldState);restore("openbone.mcp.port",oldPort);restore("openbone.ffmpeg",oldEncoder);
+        }
+    }
+
+    @Test @EnabledIfSystemProperty(named="openbone.ninjaFraming",matches="true")
+    void actualZhenYuFastAttackBirthAndDeathFitEveryEncodedFrame() throws Exception {
+        Path ffmpeg=Path.of("D:/Program Files/Python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe");
+        Path project=Path.of(System.getProperty("openbone.ninjaFramingProject","E:/resource/ninja3-assets-047097ea/OpenBone项目与预览/02_Boss/ZhenYu__6ad15f3add/project.openbone.json"));
+        Assumptions.assumeTrue(Files.isRegularFile(ffmpeg)&&Files.isRegularFile(project));
+        String oldState=System.getProperty("openbone.userState"),oldPort=System.getProperty("openbone.mcp.port"),oldEncoder=System.getProperty("openbone.ffmpeg");
+        System.setProperty("openbone.userState",temp.resolve("ninja-framing-state").toString());System.setProperty("openbone.mcp.port","0");System.setProperty("openbone.ffmpeg",ffmpeg.toString());
+        McpConnectionSettings.save(McpConnectionSettings.path(),new McpConnectionSettings.State(39871,true,""));
+        try {
+            edt(()->{frame=new EditorFrame(project);frame.setSize(1535,1100);frame.showEditor();return null;});
+            awaitMcpStarted();edt(()->{url=((EditorMcpServer)field("mcpServer")).url();token=(String)field("mcpToken");return null;});
+            var model=edt(()->frame.history().state().model());String revision=data(call("openbone_get_context",Map.of())).path("revision").asText();
+            assertEquals("1",model.resources().activeSkin());
+            for(String name:List.of("attack_down","attack_up","born_start","story_die")) {
+                var clip=model.animations().stream().filter(a->a.name().equals(name)).findFirst().orElseThrow();
+                Path directory=temp.resolve("zhenyu-"+name);
+                var started=data(call("openbone_render_animation",Map.of("directory",directory.toString(),"animationId",clip.id().value(),"fps",24,"fit",true,"expectedRevision",revision,"requestId","framing-"+name)));
+                JsonNode result=null;
+                for(int i=0;i<60;i++){result=data(call("openbone_render_status",Map.of("jobId",started.path("jobId").asText(),"waitMs",5000)));if(Set.of("COMPLETE","FAILED","CANCELLED").contains(result.path("status").asText()))break;}
+                assertEquals("COMPLETE",result.path("status").asText(),result.toString());
+                assertEquals((int)Math.ceil(clip.duration()*24)+1,result.path("decodedFrameCount").asInt());
+                assertEquals(0,result.path("framesTouchingImageEdge").asInt(),name+" clipped: "+result);
+                assertTrue(result.path("nonEmptyFrameCount").asInt()>0,name+" must visibly render");
+                Path evidence=Path.of("target/ninja-framing-real-gl",name);Files.createDirectories(evidence);
+                for(String file:List.of("animation.mp4","preview.png","proof.json"))Files.copy(directory.resolve(file),evidence.resolve(file),StandardCopyOption.REPLACE_EXISTING);
+                System.out.println("NINJA FRAMING "+name+" decoded="+result.path("decodedFrameCount")+" edge="+result.path("framesTouchingImageEdge"));
+            }
+        } finally {
+            if(frame!=null)edt(()->{if(frame.isDisplayable()){frame.history().markSaved();invoke("closeRequested");}return null;});
+            restore("openbone.userState",oldState);restore("openbone.mcp.port",oldPort);restore("openbone.ffmpeg",oldEncoder);
+        }
+    }
+
+    @Test @EnabledIfSystemProperty(named="openbone.snakeFraming",matches="true")
+    void actualWideSnakeFitsBelowInteractiveZoomMinimumWithoutCropping() throws Exception {
+        Path ffmpeg=Path.of("D:/Program Files/Python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe");
+        Path project=Path.of(System.getProperty("openbone.snakeFramingProject","E:/resource/ninja3-assets-047097ea/OpenBone项目与预览/02_Boss/snake__751d5bc9a9/project.openbone.json"));
+        Assumptions.assumeTrue(Files.isRegularFile(ffmpeg)&&Files.isRegularFile(project));
+        String oldState=System.getProperty("openbone.userState"),oldPort=System.getProperty("openbone.mcp.port"),oldEncoder=System.getProperty("openbone.ffmpeg");
+        System.setProperty("openbone.userState",temp.resolve("snake-framing-state").toString());System.setProperty("openbone.mcp.port","0");System.setProperty("openbone.ffmpeg",ffmpeg.toString());
+        McpConnectionSettings.save(McpConnectionSettings.path(),new McpConnectionSettings.State(39871,true,""));
+        try {
+            edt(()->{frame=new EditorFrame(project);frame.setSize(1535,1100);frame.showEditor();return null;});
+            awaitMcpStarted();edt(()->{url=((EditorMcpServer)field("mcpServer")).url();token=(String)field("mcpToken");return null;});
+            long loadDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(120);
+            while(!edt(()->frame.history().state().model().animations().stream().anyMatch(a->a.name().equals("snakebody_idle")))) {
+                if(System.nanoTime()>loadDeadline)fail("Wide snake project did not finish loading");
+                Thread.sleep(50);
+            }
+            var model=edt(()->frame.history().state().model());var clip=model.animations().stream().filter(a->a.name().equals("snakebody_idle")).findFirst().orElseThrow();
+            String revision=data(call("openbone_get_context",Map.of())).path("revision").asText();
+            Path directory=temp.resolve("snake-media");var started=data(call("openbone_render_animation",Map.of("directory",directory.toString(),"animationId",clip.id().value(),"fps",24,"fit",true,"expectedRevision",revision,"requestId","wide-snake")));
+            JsonNode result=null;
+            for(int i=0;i<60;i++){result=data(call("openbone_render_status",Map.of("jobId",started.path("jobId").asText(),"waitMs",5000)));if(Set.of("COMPLETE","FAILED","CANCELLED").contains(result.path("status").asText()))break;}
+            assertEquals("COMPLETE",result.path("status").asText(),result.toString());
+            assertEquals(193,result.path("decodedFrameCount").asInt());
+            assertEquals(193,result.path("nonEmptyFrameCount").asInt());
+            assertEquals(0,result.path("framesTouchingImageEdge").asInt(),result.toString());
+            double zoom=edt(()->((io.github.samlinb.openbone.viewport.EditorViewport)field("viewport")).camera().zoom());
+            assertTrue(zoom<.05,"Wide source must use the explicit bounds-fit path: "+zoom);
+            Path evidence=Path.of("target/snake-wide-framing-real-gl");Files.createDirectories(evidence);
+            for(String file:List.of("animation.mp4","preview.png","proof.json"))Files.copy(directory.resolve(file),evidence.resolve(file),StandardCopyOption.REPLACE_EXISTING);
+            System.out.println("WIDE SNAKE decoded="+result.path("decodedFrameCount")+" edge="+result.path("framesTouchingImageEdge")+" zoom="+zoom);
+        } finally {
+            if(frame!=null)edt(()->{if(frame.isDisplayable()){frame.history().markSaved();invoke("closeRequested");}return null;});
+            restore("openbone.userState",oldState);restore("openbone.mcp.port",oldPort);restore("openbone.ffmpeg",oldEncoder);
+        }
+    }
     void restore(String key, String value) { if (value == null) System.clearProperty(key); else System.setProperty(key, value); }
     Object field(String name) throws Exception { var f = EditorFrame.class.getDeclaredField(name); f.setAccessible(true); return f.get(frame); }
     void invoke(String name) throws Exception { var m = EditorFrame.class.getDeclaredMethod(name); m.setAccessible(true); m.invoke(frame); }

@@ -81,7 +81,7 @@ class EditorMcpServerTest {
             var image = new BufferedImage(12, 8, BufferedImage.TYPE_INT_RGB);
             image.setRGB(3, 2, 0xff00ff00);
             return CompletableFuture.completedFuture(
-                    new EditorMcpTools.Preview(image, Map.of("revision", history.revision(), "time", time)));
+                    new EditorMcpTools.Preview(image, Map.of("revision", history.revision(), "animationId", animation.value(), "time", time)));
         }
     }
 
@@ -187,13 +187,33 @@ class EditorMcpServerTest {
         var notification = JSON.createObjectNode().put("jsonrpc", "2.0").put("method", "notifications/initialized");
         assertEquals(202, post(notification).statusCode());
         var tools = rpc("tools/list", Map.of()).path("result").path("tools");
-        assertEquals(10, tools.size());
+        assertEquals(13, tools.size());
         for (var tool : tools) {
             assertEquals("object", tool.path("inputSchema").path("type").asText());
             assertFalse(tool.path("inputSchema").path("additionalProperties").asBoolean());
             assertTrue(tool.has("outputSchema"));
             assertFalse(tool.path("annotations").path("openWorldHint").asBoolean());
         }
+    }
+
+    @Test void nativeMediaToolsKeepRetriesStableBlockMutationsAndCancelWithoutPublishing() throws Exception {
+        Path ffmpeg=Path.of("D:/Program Files/Python/Lib/site-packages/imageio_ffmpeg/binaries/ffmpeg-win-x86_64-v7.1.exe");
+        Assumptions.assumeTrue(Files.isRegularFile(ffmpeg));String prior=System.getProperty("openbone.ffmpeg");
+        System.setProperty("openbone.ffmpeg",ffmpeg.toString());
+        try {
+            String before=revision();var model=ok("openbone_apply_edits",mutation(before,create(),key(0,"ROTATE",0),key(600,"ROTATE",1)));
+            String revision=model.path("revision").asText();Path directory=temp.resolve("native-movie");
+            var args=Map.of("directory",directory.toString(),"animationId",CLIP.value(),"fps",60,"fit",false,
+                    "expectedRevision",revision,"requestId","media-retry-test");
+            var started=ok("openbone_render_animation",args);String job=started.path("jobId").asText();
+            assertFalse(job.isBlank());assertEquals(started,ok("openbone_render_animation",args));
+            var denied=rpc("tools/call",Map.of("name","openbone_control_view","arguments",Map.of("action","pause","expectedRevision",revision,"requestId","busy"))).path("result");
+            assertTrue(denied.path("isError").asBoolean());assertTrue(denied.toString().contains("MEDIA_BUSY"));
+            ok("openbone_cancel_render",Map.of("jobId",job));
+            var status=ok("openbone_render_status",Map.of("jobId",job,"waitMs",5000));
+            assertEquals("CANCELLED",status.path("status").asText());assertFalse(Files.exists(directory));
+            assertEquals(revision,revision());
+        } finally {if(prior==null)System.clearProperty("openbone.ffmpeg");else System.setProperty("openbone.ffmpeg",prior);}
     }
 
     @Test

@@ -35,7 +35,7 @@ class SpineMetadataTest {
         var d = sample(); assertTrue(codec.warnings().isEmpty(), () -> codec.warnings().toString());
         var original = json.readTree(source);
         var projects = new ProjectCodec(); var encoded = projects.encode(d);
-        assertEquals(9, json.readTree(encoded).path("schemaVersion").asInt());
+        assertEquals(13, json.readTree(encoded).path("schemaVersion").asInt());
         assertEquals(d, projects.decode(encoded)); assertArrayEquals(encoded, projects.encode(projects.decode(encoded)));
         var doc = new ProjectDocument(d); Path project = temp.resolve("saved.json"); doc.savePortable(project);
         var reopened = new ProjectDocument(DocumentSnapshot.EMPTY); reopened.open(project);
@@ -53,13 +53,14 @@ class SpineMetadataTest {
         }
     }
 
-    @Test void sourceChangesAndVertexMovesKeepMetadataWhileTopologyChangesClearOldEdges() throws Exception {
+    @Test void sourceChangesAndVertexMovesKeepMetadataWhileRuntimeTopologyChangesAreRejected() throws Exception {
         var d = sample(); var id = d.attachments().get(0).id(); var metadata = d.resources().metadata();
         var moved = MeshEdits.vertex(d, id, 0, new Vec2(-1,0), new Vec2(0,1));
         assertEquals(metadata, moved.resources().metadata());
-        var changed = MeshEdits.insert(d, id, 1, new Vec2(5,-1), new Vec2(.5,1), true);
-        assertNull(changed.resources().metadata().meshes().get(id).edges());
-        assertEquals(16., changed.resources().metadata().meshes().get(id).width());
+        var original=((MeshAttachment)d.attachments().get(0)).vertices();
+        assertThrows(IllegalArgumentException.class,()->MeshEdits.insert(d, id, 1, new Vec2(5,-1), new Vec2(.5,1), true));
+        assertEquals(original,((MeshAttachment)d.attachments().get(0)).vertices());
+        assertEquals(metadata,d.resources().metadata());
         assertEquals(metadata, ExtendedEdits.addSkin(d, "extra").resources().metadata());
     }
 

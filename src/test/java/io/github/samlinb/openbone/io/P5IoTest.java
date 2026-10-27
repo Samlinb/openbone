@@ -125,9 +125,9 @@ class P5IoTest {
         assertThrows(IOException.class,()->new SkeletonJsonCodec().decode("{\"skeleton\":{},\"skeleton\":{}}".getBytes(),temp));
         Files.delete(temp.resolve("part0.png"));assertThrows(IOException.class,()->new SkeletonJsonCodec().decode(json.writeValueAsBytes(baseline),temp));
     }
-    @Test void atlasRotationTrimPmaAndCustomFieldsRefuseInsteadOfBeingDropped() throws Exception {
+    @Test void atlasInvalidRotationTrimAndCustomFieldsRefuseInsteadOfBeingDropped() throws Exception {
         var d=model();Path path=export(d,temp.resolve("pkg")),atlas=path.resolveSibling("skeleton.atlas");String baseline=Files.readString(atlas);
-        for(String text:List.of(baseline.replace("rotate: false","rotate: true"),baseline.replace("offset: 0,0","offset: 1,0"),baseline.replace("pma: false","pma: true"),baseline.replace("RGBA8888","RGB888"),baseline.replace("  index: -1","  mystery: 1\n  index: -1"))){Files.writeString(atlas,text);assertThrows(IOException.class,()->new SkeletonJsonCodec().read(path));}
+        for(String text:List.of(baseline.replace("rotate: false","rotate: true"),baseline.replace("offset: 0,0","offset: 1,0"),baseline.replace("RGBA8888","RGB888"),baseline.replace("  index: -1","  mystery: 1\n  index: -1"))){Files.writeString(atlas,text);assertThrows(IOException.class,()->new SkeletonJsonCodec().read(path));}
     }
     @Test void float32OverflowAndTinyMatrixMaskingAreRejectedWhileDoubleProjectsRemainValid() throws Exception {
         for(double[] values:List.of(new double[]{1e308,1,1},new double[]{1e20,1e20,1e-20},new double[]{Float.MIN_VALUE,1e30,1},new double[]{1e19,1e19,1e-20})){

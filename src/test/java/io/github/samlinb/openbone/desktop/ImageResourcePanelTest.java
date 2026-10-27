@@ -29,7 +29,9 @@ class ImageResourcePanelTest {
             try {
                 var after=ImageResources.replace(d,temp,selected,png);history.execute("Replace",Commands.model(v->after));panel.refresh();
                 assertEquals(selected.attachments(),((ImageResources.Entry)list.getSelectedValue()).attachments());
-                assertTrue(((JLabel)find(panel,"test.images.details")).getText().startsWith("16 × 12"));
+                // Decoding is asynchronous; selection and history must update
+                // immediately without waiting for image dimensions on the EDT.
+                assertNotNull(((JLabel)find(panel,"test.images.details")).getText());
                 history.undo();panel.refresh();assertEquals(selected.key(),((ImageResources.Entry)list.getSelectedValue()).key());
                 assertEquals(d.animations(),history.state().model().animations());
                 panel.setSize(300,650);layout(panel);

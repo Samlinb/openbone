@@ -40,7 +40,7 @@ class StretchymanImportTest {
         Path saved=temp.resolve("stretchyman.openbone.json");
         document.savePortable(saved);
         var codec=new ProjectCodec();
-        assertEquals(11,codec.parseTree(Files.readAllBytes(saved)).path("schemaVersion").asInt());
+        assertEquals(13,codec.parseTree(Files.readAllBytes(saved)).path("schemaVersion").asInt());
         var reopened=new ProjectDocument(DocumentSnapshot.EMPTY);reopened.openResolved(saved);
         assertEquals(model.attachments().stream().filter(a->a instanceof PathAttachment).toList(),
                 reopened.history().state().model().attachments().stream().filter(a->a instanceof PathAttachment).toList());

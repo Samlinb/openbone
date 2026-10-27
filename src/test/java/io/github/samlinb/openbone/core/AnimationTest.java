@@ -113,7 +113,7 @@ class AnimationTest {
     @Test void playbackUsesClockAnchorLoopBoundaryPauseEndAndExplicitQuantization(){
         var p=new Playback();long start=1_000_000_000L;p.play(start,1);p.tick(start+333_333_333,1);assertEquals(.333333333,p.time());p.tick(start+750_000_000,1);assertEquals(.75,p.time());p.pause(start+800_000_000,1);assertEquals(.8,p.time());p.tick(start+900_000_000,1);assertEquals(.8,p.time());
         p.play(start+1_000_000_000,1);p.tick(start+1_400_000_000,1);assertEquals(1,p.time());assertFalse(p.playing());p.play(start+2_000_000_000,1);assertEquals(0,p.time());p.loop(true);p.tick(start+3_000_000_000L,1);assertEquals(0,p.time());assertTrue(p.playing());p.tick(start+3_250_000_000L,1);assertEquals(.25,p.time());
-        p.seek(.123456789);assertFalse(p.playing());assertEquals(.123456789,p.time());assertEquals(4./30,Playback.snap(p.time(),30));p.play(start,0);assertFalse(p.playing());assertEquals(0,p.time());
+        p.seek(.123456789);assertFalse(p.playing());assertEquals(.123456789,p.time());assertEquals(4./30,Playback.snap(p.time(),30));p.play(start,0);assertFalse(p.playing());assertEquals(0,p.time());assertEquals(0,p.absoluteTime());
         assertEquals(0,AnimationSampler.sampleTime(1,1,true));assertEquals(1,AnimationSampler.sampleTime(1,1,false));
     }
 }

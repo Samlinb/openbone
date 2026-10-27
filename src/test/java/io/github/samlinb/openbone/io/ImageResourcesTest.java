@@ -89,4 +89,15 @@ class ImageResourcesTest {
         var after=ImageResources.replace(d,temp,selected,replacement());var changed=(MeshAttachment)after.attachments().get(0);
         assertEquals(weighted,changed.withSource(weighted.source()));assertEquals(d.animations(),after.animations());
     }
+
+    @Test void previewCacheDecodesOneAtlasPageForAllRegionsAndKeepsExactPixels()throws Exception {
+        var model=fixture(false);var entries=ImageResources.list(model,temp);var reads=new java.util.concurrent.atomic.AtomicInteger();
+        var cache=new ImageResources.PreviewCache(){@Override protected BufferedImage read(Path path)throws java.io.IOException {reads.incrementAndGet();return super.read(path);}};
+        for(var entry:entries) {
+            var expected=ImageResources.preview(entry);var actual=cache.preview(entry);
+            assertArrayEquals(expected.getRGB(0,0,expected.getWidth(),expected.getHeight(),null,0,expected.getWidth()),
+                    actual.getRGB(0,0,actual.getWidth(),actual.getHeight(),null,0,actual.getWidth()));
+        }
+        assertEquals(entries.stream().map(e->e.key().source()).distinct().count(),reads.get());
+    }
 }
