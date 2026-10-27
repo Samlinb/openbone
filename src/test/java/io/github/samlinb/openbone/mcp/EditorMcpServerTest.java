@@ -137,6 +137,25 @@ class EditorMcpServerTest {
         return ok("openbone_get_context", Map.of()).path("revision").asText();
     }
 
+    @Test void versionedSpineExportUsesSnapshotAndIdempotentPublication()throws Exception {
+        String before=revision();
+        for(var family:io.github.samlinb.openbone.io.SpineVersion.values())for(String format:List.of("JSON","BINARY")) {
+            Path directory=temp.resolve(family.family()+format);
+            var args=Map.of("directory",directory.toString(),"version",family.exportVersion(),"format",format,"expectedRevision",before,"requestId",family.family()+format);
+            var result=ok("openbone_export_spine",args);assertEquals(before,result.path("sourceRevision").asText());
+            Path file=Path.of(result.path("path").asText());assertTrue(Files.isRegularFile(file));
+            assertEquals(1,new io.github.samlinb.openbone.io.SkeletonJsonCodec().read(file).bones().size());
+            byte[] pointer=Files.readAllBytes(directory.resolve("current.json"));
+            assertEquals(result,ok("openbone_export_spine",args));assertArrayEquals(pointer,Files.readAllBytes(directory.resolve("current.json")));
+            assertEquals(before,revision());
+        }
+        Path invalid=temp.resolve("invalid-export");
+        assertTrue(call("openbone_export_spine",Map.of("directory",invalid.toString(),"version","4.4.1","format","BINARY","expectedRevision",before,"requestId","invalid-export")).path("isError").asBoolean());
+        assertFalse(Files.exists(invalid));
+        assertTrue(call("openbone_export_spine",Map.of("directory",invalid.toString(),"version","4.2.22","format","BINARY","expectedRevision","stale","requestId","stale-export")).path("isError").asBoolean());
+        assertFalse(Files.exists(invalid));assertEquals(before,revision());
+    }
+
     Map<String, Object> create() {
         return Map.of("op", "create_animation", "animationId", CLIP.value(), "name", "AI 待机");
     }
@@ -168,7 +187,7 @@ class EditorMcpServerTest {
         var notification = JSON.createObjectNode().put("jsonrpc", "2.0").put("method", "notifications/initialized");
         assertEquals(202, post(notification).statusCode());
         var tools = rpc("tools/list", Map.of()).path("result").path("tools");
-        assertEquals(9, tools.size());
+        assertEquals(10, tools.size());
         for (var tool : tools) {
             assertEquals("object", tool.path("inputSchema").path("type").asText());
             assertFalse(tool.path("inputSchema").path("additionalProperties").asBoolean());
@@ -542,6 +561,62 @@ class EditorMcpServerTest {
             assertEquals("root", host.history.state().model().bone(BONE).name());
             return null;
         });
+    }
+
+    @Test
+    void binaryExportLoadIsAtomicRevisionCheckedAndIdempotent() throws Exception {
+        String before = revision();
+        var load = Map.of("path", Path.of("src/test/resources/spine40/Ninjahouse_xiaohei.skel.bytes").toAbsolutePath().toString(),
+                "expectedRevision", before, "requestId", "binary-once", "dirtyPolicy", "discard");
+        var result = ok("openbone_load_project", load);
+        assertTrue(result.path("dirty").asBoolean());
+        assertEquals(17, edt(() -> host.history.state().model().bones().size()));
+        assertEquals(4, edt(() -> host.history.state().model().animations().size()));
+        assertEquals(result, ok("openbone_load_project", load));
+        String loaded = revision();
+        assertTrue(call("openbone_load_project", Map.of("path", load.get("path"), "expectedRevision", before,
+                "requestId", "stale-binary", "dirtyPolicy", "discard")).path("isError").asBoolean());
+        assertEquals(loaded, revision());
+        Path broken = temp.resolve("broken.skel"); Files.write(broken, new byte[]{1, 2, 3});
+        assertTrue(call("openbone_load_project", Map.of("path", broken.toString(), "expectedRevision", loaded,
+                "requestId", "broken-binary", "dirtyPolicy", "discard")).path("isError").asBoolean());
+        assertEquals(loaded, revision());
+        assertEquals(17, edt(() -> host.history.state().model().bones().size()));
+    }
+
+    @Test
+    void unknownVersionReturnsRiskWithoutMutationAndApprovalIsBoundToFileAndRevision() throws Exception {
+        Path file=temp.resolve("unknown.json");
+        Files.writeString(file,"{\"skeleton\":{\"spine\":\"4.4.9\"},\"bones\":[{\"name\":\"imported\"}],\"slots\":[],\"skins\":[{\"name\":\"default\",\"attachments\":{}}]}");
+        String before=revision();var original=host.project;
+        var args=new LinkedHashMap<String,Object>();
+        args.put("path",file.toString());args.put("expectedRevision",before);
+        args.put("dirtyPolicy","discard");args.put("requestId","unknown-probe");
+        var response=call("openbone_load_project",args);
+        assertTrue(response.path("isError").asBoolean());
+        var risk=response.path("structuredContent");
+        assertEquals("SPINE_VERSION_RISK",risk.path("code").asText());
+        assertTrue(risk.path("requiresConfirmation").asBoolean());
+        assertEquals("4.4.9",risk.path("sourceVersion").asText());
+        assertEquals("JSON_43",risk.path("parserId").asText());
+        assertEquals("4.3.26",risk.path("parserVersion").asText());
+        assertSame(original,host.project);assertEquals(before,revision());
+        args.put("versionRiskApproval",JSON.convertValue(risk.path("versionRiskApproval"),Map.class));
+        args.put("requestId","unknown-changed");Files.writeString(file,Files.readString(file)+" ");
+        assertTrue(call("openbone_load_project",args).path("isError").asBoolean());
+        assertSame(original,host.project);assertEquals(before,revision());
+        args.remove("versionRiskApproval");args.put("requestId","unknown-reprobe");
+        risk=call("openbone_load_project",args).path("structuredContent");
+        args.put("versionRiskApproval",JSON.convertValue(risk.path("versionRiskApproval"),Map.class));
+        args.put("requestId","unknown-approved");
+        var result=ok("openbone_load_project",args);
+        assertTrue(result.path("dirty").asBoolean());assertNotEquals(before,revision());
+        assertFalse(result.path("importWarnings").isEmpty());
+        assertEquals("imported",edt(()->host.history.state().model().bones().get(0).name()));
+        assertEquals(result,ok("openbone_load_project",args));
+        String loaded=revision();args.put("requestId","unknown-stale");
+        assertTrue(call("openbone_load_project",args).path("isError").asBoolean());
+        assertEquals(loaded,revision());
     }
 
     @Test

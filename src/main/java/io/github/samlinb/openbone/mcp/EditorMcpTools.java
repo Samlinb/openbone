@@ -66,9 +66,12 @@ public final class EditorMcpTools {
         add(tools,"openbone_save_project","Save a captured current project to an absolute .json path, portable by default (copies PNGs via the existing save service). Existing target requires overwrite:true. Preserves live undo history. If manual edits occur during IO, savedRevision identifies the disk snapshot and adopted:false leaves current state dirty. Retry with identical requestId and arguments.",schema("""
             {"path":{"type":"string"},"portable":{"type":"boolean"},"overwrite":{"type":"boolean"},"expectedRevision":{"type":"string"},"requestId":{"type":"string"}}
             ""","path","expectedRevision","requestId"),false);
-        add(tools,"openbone_load_project","Load an absolute OpenBone .json project through the existing project service. dirtyPolicy must explicitly be reject or discard; discard authorizes replacing unsaved edits. Validates before replacing current editor. Resets history; failed load preserves current project. Retry with identical requestId and arguments.",schema("""
-            {"path":{"type":"string"},"dirtyPolicy":{"enum":["reject","discard"]},"expectedRevision":{"type":"string"},"requestId":{"type":"string"}}
+        add(tools,"openbone_load_project","Load an OpenBone JSON project or import Spine JSON/binary data through the shared project service. Unknown versions return SPINE_VERSION_RISK before parsing. Present the warning to the human user; only after explicit approval resend with versionRiskApproval from the risk response and a new requestId. Fallback prefers the nearest newer parser of the same format, otherwise the nearest available parser. Forced imports still require structural validation. Binary exports resolve same-named atlas/atlas.txt and PNG pages. dirtyPolicy reject/discard controls unsaved edits. Failed loads preserve the live project. Retry successful operations with identical requestId and arguments.",schema("""
+            {"path":{"type":"string"},"dirtyPolicy":{"enum":["reject","discard"]},"expectedRevision":{"type":"string"},"requestId":{"type":"string"},"versionRiskApproval":{"type":"object","additionalProperties":false,"properties":{"sourceHash":{"type":"string","pattern":"^[0-9a-f]{64}$"},"parserId":{"enum":["JSON_38","JSON_40","JSON_41","JSON_42","JSON_43","BINARY_38","BINARY_40","BINARY_41","BINARY_42","BINARY_43","NATIVE_38","NATIVE_40","NATIVE_41","NATIVE_42","NATIVE_43"]}},"required":["sourceHash","parserId"]}}
             ""","path","dirtyPolicy","expectedRevision","requestId"),false);
+        add(tools,"openbone_export_spine","Export a snapshot of the current project as a portable Spine package. format JSON/BINARY uses independently implemented 3.8,4.0,4.1,4.2,4.3 schemas. NATIVE creates a real .spine via a separately configured licensed Spine CLI; it is not an OpenBone project renamed to .spine. Version-incompatible features fail before publication. Files publish atomically through current.json; no live model/history changes. Read context for expectedRevision and retry identical arguments with the same requestId.",schema("""
+            {"directory":{"type":"string"},"version":{"type":"string"},"format":{"enum":["JSON","BINARY","NATIVE"]},"expectedRevision":{"type":"string"},"requestId":{"type":"string"}}
+            ""","directory","version","format","expectedRevision","requestId"),false);
         return tools;
     }
 
@@ -122,7 +125,7 @@ public final class EditorMcpTools {
                 case "openbone_query_scene" -> result = success(onEdt(() -> query(args)));
                 case "openbone_capture_preview" -> result = capture(args);
                 case "openbone_apply_edits", "openbone_undo", "openbone_redo" -> result = mutate(name, args);
-                case "openbone_control_view", "openbone_save_project", "openbone_load_project" -> result = serviceOperation(name,args);
+                case "openbone_control_view", "openbone_save_project", "openbone_load_project", "openbone_export_spine" -> result = serviceOperation(name,args);
                 default -> throw new IllegalArgumentException("Unknown tool: " + name + ". Call tools/list.");
             }
             return result;
@@ -130,6 +133,13 @@ public final class EditorMcpTools {
             Throwable cause = failed;
             while (cause.getCause() != null && (cause instanceof ExecutionException || cause instanceof CompletionException)) cause = cause.getCause();
             var error = JSON.createObjectNode().put("isError", true);
+            if(cause instanceof io.github.samlinb.openbone.io.SpineVersionRiskException risk){
+                var selection=risk.selection();var detail=error.putObject("structuredContent");
+                detail.put("code","SPINE_VERSION_RISK").put("requiresConfirmation",true)
+                        .put("sourceVersion",selection.sourceVersion()).put("format",selection.format().name())
+                        .put("parserId",selection.parser().name()).put("parserVersion",selection.parser().version());
+                detail.putObject("versionRiskApproval").put("sourceHash",selection.sourceHash()).put("parserId",selection.parser().name());
+            }
             error.putArray("content").addObject().put("type", "text").put("text",
                     cause instanceof TimeoutException ? "Editor or preview timed out. Read context before retrying; keep the same requestId for a mutation retry." :
                     Objects.toString(cause.getMessage(), cause.getClass().getSimpleName()));
@@ -145,6 +155,7 @@ public final class EditorMcpTools {
         data.put("version",io.github.samlinb.openbone.EditorApplication.version());
         data.put("mcpApiVersion",2);
         data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",true,"cleanPreview",true,"atomicEdits",true));
+        data.put("spineIO",Map.of("versions",io.github.samlinb.openbone.io.SpineVersion.exportVersions(),"formats",List.of("JSON","BINARY","NATIVE"),"nativeCliConfigured",io.github.samlinb.openbone.io.SpineCliBridge.configured()));
         data.put("dirty", h.isDirty());
         data.put("busy", h.isPreviewing());
         data.put("selection", h.state().selection().ids().stream().map(EntityId::value).toList());
@@ -325,22 +336,32 @@ public final class EditorMcpTools {
         switch(name) {
             case "openbone_control_view" -> fields(a,"action","animationId","time","loop","showBones","showGrid","expectedRevision","requestId");
             case "openbone_save_project" -> fields(a,"path","portable","overwrite","expectedRevision","requestId");
-            case "openbone_load_project" -> fields(a,"path","dirtyPolicy","expectedRevision","requestId");
+            case "openbone_load_project" -> fields(a,"path","dirtyPolicy","expectedRevision","requestId","versionRiskApproval");
+            case "openbone_export_spine" -> fields(a,"directory","version","format","expectedRevision","requestId");
             default -> throw new IllegalArgumentException("Unknown service operation");
         }
         String key=name+":"+text(a,"requestId",128), revision=text(a,"expectedRevision",128);
         Receipt receipt=receipts.get(key);
         if(receipt!=null) {if(!receipt.arguments().equals(a))throw new IllegalArgumentException("requestId already used with different arguments");return receipt.result().deepCopy();}
         ObjectNode result;
-        if(name.equals("openbone_control_view")) {
+        if(name.equals("openbone_export_spine")) {
+            Path directory=SceneMcpEdits.absolutePath(a,"directory");String version=text(a,"version",32);
+            io.github.samlinb.openbone.io.SpineVersion.target(version);
+            var format=io.github.samlinb.openbone.io.ExportPackage.Format.valueOf(text(a,"format",16));
+            record ExportState(DocumentSnapshot model,Path imageBase){}
+            var snapshot=onEdt(()->{host.prepare();checkRevision(revision);return new ExportState(host.history().state().model(),host.project().path().map(Path::getParent).orElse(Path.of("").toAbsolutePath()));});
+            Path exported=new io.github.samlinb.openbone.io.ExportPackage().publish(directory,snapshot.model(),snapshot.imageBase(),version,format);
+            result=success(Map.of("path",exported.toString(),"directory",directory.toString(),"sourceRevision",revision,"version",version,"format",format.name()));
+        }else if(name.equals("openbone_control_view")) {
             String action=text(a,"action",32);
             if(!Set.of("play","pause","seek","frame","configure").contains(action))throw new IllegalArgumentException("Invalid view action");
             if(action.equals("seek")&&!a.has("time"))throw new IllegalArgumentException("seek requires time");
             var control=new ViewControl(action,a.has("animationId")?id(a,"animationId"):null,a.has("time")?number(a.get("time"),"time",0,600):null,optionalBool(a,"loop"),optionalBool(a,"showBones"),optionalBool(a,"showGrid"));
             result=onEdt(()->{host.prepare();checkRevision(revision);host.control(control);return success(context());});
         } else {
-            Path path=SceneMcpEdits.absolutePath(a,"path");io.github.samlinb.openbone.io.ProjectCodec.requireProjectPath(path);
+            Path path=SceneMcpEdits.absolutePath(a,"path");
             boolean loading=name.equals("openbone_load_project");
+            if (!loading || !ProjectDocument.isSpineExport(path)&&!io.github.samlinb.openbone.io.SpineProjectSource.isNative(path)) io.github.samlinb.openbone.io.ProjectCodec.requireProjectPath(path);
             String policy=loading?text(a,"dirtyPolicy",16):"reject";
             if(loading&&!Set.of("reject","discard").contains(policy))throw new IllegalArgumentException("dirtyPolicy must be reject or discard");
             DocumentSnapshot snapshot=onEdt(()->{
@@ -350,8 +371,17 @@ public final class EditorMcpTools {
             });
             ProjectDocument prepared=new ProjectDocument(loading?DocumentSnapshot.EMPTY:snapshot);
             if(loading) {
-                prepared.openResolved(path);
-                result=onEdt(()->{host.prepare();checkRevision(revision);host.installProject(prepared);return success(context());});
+                io.github.samlinb.openbone.io.SpineImportPolicy.Approval approval=null;
+                if(a.has("versionRiskApproval")){
+                    var accepted=a.get("versionRiskApproval");fields(accepted,"sourceHash","parserId");
+                    String hash=text(accepted,"sourceHash",64),parser=text(accepted,"parserId",32);
+                    if(!hash.matches("[0-9a-f]{64}"))throw new IllegalArgumentException("Invalid sourceHash");
+                    io.github.samlinb.openbone.io.SpineImportPolicy.Parser.valueOf(parser);
+                    approval=new io.github.samlinb.openbone.io.SpineImportPolicy.Approval(hash,parser);
+                }
+                prepared.openResolved(path,approval);
+                result=onEdt(()->{host.prepare();checkRevision(revision);host.installProject(prepared);
+                    var loaded=new LinkedHashMap<>(context());loaded.put("importWarnings",prepared.importWarnings());return success(loaded);});
             } else {
                 boolean overwrite=SceneMcpEdits.bool(a,"overwrite",false), portable=SceneMcpEdits.bool(a,"portable",true);
                 if(Files.exists(path)&&!overwrite)throw new IllegalStateException("TARGET_EXISTS: explicitly set overwrite:true or choose a new path");

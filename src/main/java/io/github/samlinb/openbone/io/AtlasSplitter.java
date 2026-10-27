@@ -19,10 +19,8 @@ public final class AtlasSplitter {
     /** Only offer extraction for a same-named atlas with imported PNG pages beside the JSON. */
     public static boolean available(Path json, DocumentSnapshot document) {
         Path source=json.toAbsolutePath().normalize();
-        String name=source.getFileName().toString();
-        int dot=name.lastIndexOf('.');
-        Path atlas=source.resolveSibling((dot<0?name:name.substring(0,dot))+".atlas");
-        if(!Files.isRegularFile(atlas)) return false;
+        Path atlas=source.resolveSibling(Spine40Binary.stem(source)+".atlas");
+        if(!Files.isRegularFile(atlas) && !Files.isRegularFile(source.resolveSibling(Spine40Binary.stem(source)+".atlas.txt"))) return false;
         try {
             var regions=AtlasSubset.read(source,true,new ArrayList<>());
             if(regions==null || regions.isEmpty() || regions.values().stream().anyMatch(r->!Files.isRegularFile(r.path()))) return false;

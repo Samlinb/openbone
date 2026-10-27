@@ -655,7 +655,7 @@ public final class ProjectCodec {
 
     public static void requireProjectPath(Path path) throws ProjectFormatException {
         String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
-        if (name.endsWith(".spine") || name.endsWith(".skel"))
-            throw new ProjectFormatException("Native .spine/.skel files are unsupported; use own schemaVersion=2 JSON");
+        if (name.endsWith(".spine") || Spine40Binary.isBinary(path))
+            throw new ProjectFormatException(io.github.samlinb.openbone.i18n.M.m("spineBinary.projectPath"));
     }
 }

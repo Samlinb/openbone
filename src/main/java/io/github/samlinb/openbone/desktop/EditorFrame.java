@@ -2731,7 +2731,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         if (!commitFocusedField())
             return;
         var c = chooser(m("editorframe.0326"));
-        c.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(m("editorframe.projectFiles"),"json","spine"));
+        c.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(m("editorframe.projectFiles"),"json","spine","skel","bytes"));
         if (c.showOpenDialog(this) != JFileChooser.APPROVE_OPTION)
             return;
         loadProject(c.getSelectedFile().toPath(), false, true);
@@ -2779,7 +2779,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
             animation.reset();
             viewport.camera().reset();
             changed();
-            if (importing || SpineProjectSource.isNative(source)) {
+            if (importing || SpineProjectSource.isNative(source) || ProjectDocument.isSpineExport(source)) {
                 frameImportedProject();
                 if (importing) { message(m("editorframe.0335")); offerAtlasSplit(source); }
                 showImportReport();
@@ -2813,6 +2813,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         if (!commitFocusedField())
             return;
         var c = chooser(m("editorframe.0334"));
+        c.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(m("editorframe.spineExportFiles"), "json", "skel", "bytes"));
         if (c.showOpenDialog(this) != JFileChooser.APPROVE_OPTION)
             return;
         guard(() -> {
@@ -2834,11 +2835,16 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
         Path directory = c.getSelectedFile().toPath().toAbsolutePath().normalize();
         String version = (String)JOptionPane.showInputDialog(this, m("editorframe.spineVersion"), m("editorframe.0340"),
                 JOptionPane.QUESTION_MESSAGE, null,
-                new String[] { SkeletonJsonCodec.VERSION, SkeletonJsonCodec.VERSION_38 }, SkeletonJsonCodec.VERSION);
+                SpineVersion.exportVersions(), SkeletonJsonCodec.VERSION);
         if (version == null) return;
+        String[] formats={m("spineExport.json"),m("spineExport.binary"),m("spineExport.native")};
+        String choice=(String)JOptionPane.showInputDialog(this,m("spineExport.format"),m("editorframe.0340"),JOptionPane.QUESTION_MESSAGE,null,formats,formats[0]);
+        if(choice==null)return;
+        ExportPackage.Format format=choice.equals(formats[1])?ExportPackage.Format.BINARY:choice.equals(formats[2])?ExportPackage.Format.NATIVE:ExportPackage.Format.JSON;
+        var snapshot=model();Path imageBase=document.path().map(Path::getParent).orElse(Path.of("").toAbsolutePath());
         guard(() -> {
-            Path exported = new ExportPackage().publish(directory, model(),
-                    document.path().map(Path::getParent).orElse(Path.of("").toAbsolutePath()), version);
+            Path exported=ProjectExportDialog.run(this,()->new ExportPackage().publish(directory,snapshot,imageBase,version,format));
+            if(exported==null)return;
             message(m("editorframe.0337") + exported);
             JOptionPane.showMessageDialog(this,
                     m("editorframe.0338") + exported + "\nAtlas：" + exported.resolveSibling("skeleton.atlas")

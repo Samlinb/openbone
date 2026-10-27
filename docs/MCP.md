@@ -1,8 +1,43 @@
 # OpenBone MCP
 
-Version 0.1.3 exposes MCP API v2 with nine tools. See [MCP API v2](MCP_V2.md) for scene construction, Bezier curves, save/load, playback, camera and clean previews. The original six tools below remain supported, with the extensions described there.
+Version 0.1.3 exposes MCP API v2 with ten tools. See [MCP API v2](MCP_V2.md) for scene construction, Bezier curves, save/load, playback, camera and clean previews. The original six tools below remain supported, with the extensions described there.
 
 MCP is a core feature of the project. An external AI can connect to a running OpenBone instance, read the project, batch-edit bone keyframes, inspect the actual OpenGL preview, and then iterate or undo. Model inference is the client's responsibility; OpenBone does not need a model API key.
+
+`openbone_load_project` also imports Spine 3.8/4.0/4.1/4.2/4.3 JSON and `.skel` / `.skel.bytes` exports through the shared project service, resolving a same-named `.atlas` or `.atlas.txt` and PNG pages. Import creates an unsaved document. Version checks, explicit dirty policy, failure atomicity and identical-request retries use the existing load contract. Binary limitations and graphical verification are documented in [Spine binary import](SPINE_BINARY_IMPORT.md). For example, call `openbone_get_context`, then use its current revision:
+
+```json
+{
+  "name": "openbone_load_project",
+  "arguments": {
+    "path": "D:/java_workspace/openbone/res/xiaohei/Ninjahouse_xiaohei.skel.bytes",
+    "expectedRevision": "<revision from openbone_get_context>",
+    "requestId": "import-xiaohei-1",
+    "dirtyPolicy": "reject"
+  }
+}
+```
+
+Use a fresh request ID for a different operation; repeat identical arguments and the same ID only to retry. Choose skin `1` or `3` using the desktop Resources panel to display the full Xiaohei character; remote skin selection is outside the current edit tool contract. Connection settings and ports are unchanged.
+
+Unknown Spine export versions stop before model decoding with `isError: true` and `structuredContent.code: "SPINE_VERSION_RISK"`. The structured content includes `requiresConfirmation`, `sourceVersion`, `format`, `parserId`, `parserVersion` and `versionRiskApproval`. Present the text warning and proposed parser to the human user. Only after their explicit approval, resubmit `openbone_load_project` with a **new** `requestId`, a current `expectedRevision`, the intended `dirtyPolicy`, and the returned approval object unchanged:
+
+```json
+"versionRiskApproval": {
+  "sourceHash": "<64-character SHA-256 from the risk response>",
+  "parserId": "JSON_43"
+}
+```
+
+Known stable families 3.8, 4.0, 4.1, 4.2 and 4.3 have explicit JSON/binary routes within their feature limits. Beta versions and unknown families require approval; historical 3.8.75 binary is excluded. 4.1.9 now uses its 4.1 adapter normally. Unknown 4.4.9 proposes the 4.3 adapter; 3.9.9 proposes 4.0. Approval is bound to source bytes and parser. Native `.spine` conversion requires a separately configured licensed CLI; without it, existing matching-JSON fallback is explicitly reported as a snapshot. See [version matrix and acceptance limits](SPINE_VERSION_COMPATIBILITY.md).
+
+`openbone_export_spine` accepts an absolute `directory`, explicit `version`, `format` (`JSON`, `BINARY`, `NATIVE`), current `expectedRevision`, and `requestId`. It exports a snapshot, leaving the live model/history/revision unchanged. A concurrent editor change cannot alter the exported snapshot; `sourceRevision` identifies it. An identical request retry returns the original receipt without republishing. A reused ID with different arguments fails. Stale revisions and unrepresentable target versions fail before publication. Files are published through the existing immutable generation/current.json scheme. The result includes `path`, `directory`, `sourceRevision`, `version`, and `format`.
+
+```json
+{"name":"openbone_export_spine","arguments":{"directory":"D:/exports/xiaohei","version":"4.1.24","format":"BINARY","expectedRevision":"<current revision>","requestId":"export-xiaohei-41"}}
+```
+
+`openbone_get_context.data.spineIO` lists export markers, formats and `nativeCliConfigured`. That flag reports configuration, not license availability. Native conversion executes outside EDT, rejects Trial output, validates output and uses a 120-second process timeout; clients should allow longer request timeouts. `OPENBONE_SPINE_COMMAND` or `-Dopenbone.spine.command=...` selects the separate executable. Native acceptance is pending a licensed installation; the local Trial cannot verify it.
 
 ## Starting and connecting
 

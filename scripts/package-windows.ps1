@@ -42,7 +42,7 @@ try {
         & $Maven -B verify
         if ($LASTEXITCODE -ne 0) { throw 'Maven verification failed.' }
     }
-    $jar = Join-Path $root "target/openbone-$version.jar"
+    $jar = Join-Path $root "target/OpenBone-$version.jar"
     if (-not (Test-Path -LiteralPath $jar)) { throw "Missing $jar. Build the shaded JAR first." }
     # A fresh input directory prevents test output, older JARs and local files entering the release.
     $work = Join-Path $root ('target/windows-package/' + [guid]::NewGuid().ToString('N'))
@@ -52,7 +52,7 @@ try {
     Set-Content -LiteralPath $cliProperties -Encoding ASCII -Value 'win-console=true'
     $packageArgs = @('--type', 'app-image', '--name', 'Openbone', '--app-version', $version,
         '--vendor', 'Openbone', '--description', '2D skeletal animation editor',
-        '--input', $inputDir.FullName, '--main-jar', "openbone-$version.jar",
+        '--input', $inputDir.FullName, '--main-jar', "OpenBone-$version.jar",
         '--main-class', 'io.github.samlinb.openbone.EditorApplication',
         '--java-options', '-Dfile.encoding=UTF-8',
         '--dest', (Join-Path $work 'image'), '--add-launcher', "Openbone-cli=$cliProperties")

@@ -59,8 +59,14 @@ public final class ProjectDocument {
     }
 
     public void openResolved(Path source) throws IOException {
-        if(SpineProjectSource.isNative(source)) { importSkeleton(source); return; }
+        openResolved(source,null);
+    }
+
+    public void openResolved(Path source, SpineImportPolicy.Approval approval) throws IOException {
+        if(SpineProjectSource.isNative(source) || isSpineExport(source)) { importSkeleton(source,approval); return; }
         history.requireIdle();
+        if(SpineImportPolicy.isJsonExport(ResourcePaths.bytes(source,ProjectCodec.MAX_BYTES))){importSkeleton(source,approval);return;}
+        if(approval!=null)throw new ProjectFormatException(m("spineImport.approvalChanged"));
         var raw = codec.read(source);
         var loaded = ResourcePaths.absolute(raw, source.toAbsolutePath().normalize().getParent());
         boolean packaged = raw.attachments().stream()
@@ -120,10 +126,19 @@ public final class ProjectDocument {
     }
 
     public void importSkeleton(Path source) throws IOException {
+        importSkeleton(source,null);
+    }
+
+    public void importSkeleton(Path source, SpineImportPolicy.Approval approval) throws IOException {
         history.requireIdle();
+        if(SpineProjectSource.isNative(source)&&SpineCliBridge.configured()){
+            importNative(source,approval);return;
+        }
         SpineProjectSource nativeSource=SpineProjectSource.isNative(source)?SpineProjectSource.resolve(source):null;
         var importer = new SkeletonJsonCodec();
-        var loaded = nativeSource==null?importer.read(source):importer.read(nativeSource.json(),nativeSource.imageBase());
+        Path input=nativeSource==null?source:nativeSource.json();
+        Path imageBase=nativeSource==null?source.toAbsolutePath().normalize().getParent():nativeSource.imageBase();
+        var loaded = importer.read(input,imageBase,approval);
         var report=new java.util.ArrayList<>(importer.warnings());
         if(nativeSource!=null) report.add(0,m("spineProject.snapshotWarning",nativeSource.json()));
         history.reset(loaded);
@@ -133,6 +148,32 @@ public final class ProjectDocument {
         // Import creates a new unsaved editable document, even if the source had no
         // animation.
         history.markUnsaved();
+    }
+
+    private void importNative(Path source,SpineImportPolicy.Approval approval)throws IOException {
+        byte[] sourceBytes=ResourcePaths.bytes(source,64*1024*1024);
+        var selection=SpineImportPolicy.select(sourceBytes,SpineImportPolicy.Format.NATIVE,approval);
+        Path temporary=java.nio.file.Files.createTempDirectory("openbone-native-");
+        try {
+            Path copy=temporary.resolve("source.spine");java.nio.file.Files.write(copy,sourceBytes);
+            Path json=SpineCliBridge.exportProject(copy,temporary,selection.known()?selection.sourceVersion():selection.parser().version());
+            var importer=new SkeletonJsonCodec();
+            var loaded=importer.read(json,source.toAbsolutePath().getParent());
+            var report=new java.util.ArrayList<>(importer.warnings());report.add(0,m("spineNative.converted",selection.sourceVersion()));
+            if(!selection.known())report.add(selection.message());
+            SpineImportPolicy.select(ResourcePaths.bytes(source,64*1024*1024),SpineImportPolicy.Format.NATIVE,selection.approval());
+            history.reset(loaded);importWarnings=java.util.List.copyOf(report);path=null;portable=true;history.markUnsaved();
+        } finally {
+            // Only remove files created inside this exact private conversion directory.
+            try(var entries=java.nio.file.Files.walk(temporary)) {
+                for(Path path:entries.sorted(java.util.Comparator.reverseOrder()).toList())if(path.normalize().startsWith(temporary))java.nio.file.Files.deleteIfExists(path);
+            } catch(IOException cleanup) {temporary.toFile().deleteOnExit();}
+        }
+    }
+
+    public static boolean isSpineExport(Path source) {
+        String name = source.getFileName().toString().toLowerCase(java.util.Locale.ROOT);
+        return name.endsWith(".skel") || name.endsWith(".skel.bytes");
     }
 
     private void protectImages(Path target) throws IOException {

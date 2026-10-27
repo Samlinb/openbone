@@ -30,6 +30,81 @@ class McpDesktopTest {
     String url, token;
     int sequence;
 
+    @Test void xiaoheiBinaryLoadsRendersAnimatesEditsAndUndoesThroughMcp() throws Exception {
+        String oldState=System.getProperty("openbone.userState"), oldPort=System.getProperty("openbone.mcp.port");
+        System.setProperty("openbone.userState",temp.resolve("xiaohei-state").toString());
+        System.setProperty("openbone.mcp.port","0");
+        McpConnectionSettings.save(McpConnectionSettings.path(),new McpConnectionSettings.State(39871,true,""));
+        Path source=Path.of("src/test/resources/spine40/Ninjahouse_xiaohei.skel.bytes").toAbsolutePath();
+        byte[] original=Files.readAllBytes(source);
+        try {
+            edt(()->{frame=new EditorFrame(null);frame.setSize(1200,850);frame.showEditor();return null;});
+            awaitMcpStarted();
+            edt(()->{url=((EditorMcpServer)field("mcpServer")).url();token=(String)field("mcpToken");return null;});
+            String before=data(call("openbone_get_context",Map.of())).path("revision").asText();
+            var load=Map.of("path",source.toString(),"expectedRevision",before,"requestId","load-xiaohei","dirtyPolicy","discard");
+            var loaded=data(call("openbone_load_project",load));
+            assertTrue(loaded.path("dirty").asBoolean());
+            assertEquals(loaded,data(call("openbone_load_project",load)));
+            // The source intentionally keeps body parts in skins 1 and 3; use the same command as the skin UI.
+            var model=edt(()->{
+                frame.history().execute("Select skin 1",io.github.samlinb.openbone.application.Commands.model(
+                        d->io.github.samlinb.openbone.application.ExtendedEdits.skin(d,"1")));
+                invoke("changed"); return frame.history().state().model();
+            });
+            assertEquals(17,model.bones().size()); assertEquals(4,model.animations().size());
+            call("openbone_control_view",Map.of("action","configure","showBones",false,"showGrid",false,
+                    "expectedRevision",edt(()->frame.history().revision()),"requestId","clean-xiaohei-preview"));
+            call("openbone_control_view",Map.of("action","frame","expectedRevision",edt(()->frame.history().revision()),"requestId","frame-xiaohei"));
+            String revision=edt(()->frame.history().revision());
+            var shots=new ArrayList<BufferedImage>();
+            for(var clip:model.animations()) for(double time:new double[]{0,clip.duration()*.5}) {
+                var capture=call("openbone_capture_preview",Map.of("animationId",clip.id().value(),"time",time,"expectedRevision",revision,"fit",true));
+                assertEquals(revision,data(capture).path("revision").asText()); shots.add(image(capture));
+            }
+            BufferedImage walk0=shots.get(6),walk1=shots.get(7); int changed=0;
+            for(int y=0;y<walk0.getHeight();y++) for(int x=0;x<walk0.getWidth();x++)
+                if(walk0.getRGB(x,y)!=walk1.getRGB(x,y)) changed++;
+            assertTrue(changed>500,"Walk must animate actual rendered texture pixels");
+            var clip=model.animations().get(3); var bone=model.bones().get(1);
+            var edit=Map.of("expectedRevision",revision,"requestId","edit-xiaohei","edits",List.of(Map.of("op","put_keyframe",
+                    "animationId",clip.id().value(),"boneId",bone.id().value(),"channel","ROTATE","time",0,"values",List.of(35))));
+            var edited=data(call("openbone_apply_edits",edit));
+            call("openbone_undo",Map.of("expectedRevision",edited.path("revision").asText(),"requestId","undo-xiaohei"));
+            assertEquals(model,edt(()->frame.history().state().model()));
+            Path output=Path.of("target/xiaohei-validation").toAbsolutePath();Files.createDirectories(output);
+            int w=shots.get(0).getWidth(),h=shots.get(0).getHeight();
+            var sheet=new BufferedImage(w*2,h*4,BufferedImage.TYPE_INT_RGB);var graphics=sheet.createGraphics();
+            for(int i=0;i<shots.size();i++) {
+                graphics.drawImage(shots.get(i),(i%2)*w,(i/2)*h,null);graphics.setColor(java.awt.Color.WHITE);
+                graphics.drawString(model.animations().get(i/2).name()+(i%2==0?" t=0":" midpoint"),(i%2)*w+12,(i/2)*h+22);
+            }
+            graphics.dispose();ImageIO.write(sheet,"PNG",output.resolve("preview.png").toFile());
+            call("openbone_save_project",Map.of("path",output.resolve("xiaohei.json").toString(),"portable",true,"overwrite",true,
+                    "expectedRevision",edt(()->frame.history().revision()),"requestId","save-xiaohei"));
+            assertArrayEquals(original,Files.readAllBytes(source));
+            var exportedFiles=new ArrayList<Path>();
+            for(String version:List.of("4.0.64","4.1.24","4.2.22","4.3.26"))for(String format:List.of("JSON","BINARY")) {
+                var exported=data(call("openbone_export_spine",Map.of("directory",output.resolve(version+format).toString(),"version",version,"format",format,
+                        "expectedRevision",edt(()->frame.history().revision()),"requestId","export-"+version+format)));
+                exportedFiles.add(Path.of(exported.path("path").asText()));
+            }
+            for(Path exported:exportedFiles) {
+                call("openbone_load_project",Map.of("path",exported.toString(),"expectedRevision",edt(()->frame.history().revision()),"requestId",UUID.randomUUID().toString(),"dirtyPolicy","discard"));
+                var roundtrip=edt(()->{frame.history().execute("Select skin 1",io.github.samlinb.openbone.application.Commands.model(d->io.github.samlinb.openbone.application.ExtendedEdits.skin(d,"1")));invoke("changed");return frame.history().state().model();});
+                var walk=roundtrip.animations().stream().filter(c->c.name().equals("walk")).findFirst().orElseThrow();
+                var capture=call("openbone_capture_preview",Map.of("animationId",walk.id().value(),"time",walk.duration()*.5,"expectedRevision",edt(()->frame.history().revision()),"fit",true,"showBones",false,"showGrid",false));
+                var pixels=image(capture);int foreground=0,background=pixels.getRGB(0,0);
+                for(int y=0;y<pixels.getHeight();y++)for(int x=0;x<pixels.getWidth();x++)if(pixels.getRGB(x,y)!=background)foreground++;
+                assertTrue(foreground>1000,"Exported package must render actual character pixels: "+exported);
+                ImageIO.write(pixels,"PNG",output.resolve(exported.getParent().getParent().getFileName()+"-roundtrip.png").toFile());
+            }
+        } finally {
+            if(frame!=null) edt(()->{if(frame.isDisplayable()){frame.history().markSaved();invoke("closeRequested");}return null;});
+            restore("openbone.userState",oldState);restore("openbone.mcp.port",oldPort);
+        }
+    }
+
     @Test
     @EnabledIfSystemProperty(named="openbone.mcp.sdkPython",matches=".+")
     void officialSdkBuildsSixLegRigFromBlankAndSavesAndLoads() throws Exception {

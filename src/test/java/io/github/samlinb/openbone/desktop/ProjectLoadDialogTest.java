@@ -95,6 +95,44 @@ class ProjectLoadDialogTest {
         edt(() -> { assertFalse(owner.getOwnedWindows()[0].isDisplayable()); return null; });
     }
 
+    @Test void unknownVersionShowsRiskWithCancelDefaultAndOnlyForcePublishesCandidate() throws Exception {
+        Path file=temp.resolve("unknown.json");
+        Files.writeString(file,"{\"skeleton\":{\"spine\":\"4.4.9\"},\"bones\":[{\"name\":\"root\"}],\"slots\":[],\"skins\":[{\"name\":\"default\",\"attachments\":{}}]}");
+        byte[] source=Files.readAllBytes(file);
+        for(boolean force:new boolean[]{false,true}) {
+            var seen=new java.util.concurrent.atomic.AtomicBoolean();
+            var task=new FutureTask<>(()->ProjectLoadDialog.load(owner,file,true));
+            edt(()->{
+                var timer=new Timer(20,null);
+                timer.addActionListener(event->{
+                    for(Window window:owner.getOwnedWindows()) {
+                        if(window instanceof JDialog dialog&&dialog.isShowing()&&"spineImport.versionRisk".equals(dialog.getName())) {
+                            var pane=optionPane(dialog);
+                            assertNotNull(pane);
+                            assertEquals(io.github.samlinb.openbone.i18n.M.m("spineImport.cancel"),pane.getInitialValue());
+                            assertTrue(((JTextArea)pane.getMessage()).getText().contains("4.4.9"));
+                            assertTrue(((JTextArea)pane.getMessage()).getText().contains("4.3.26"));
+                            if(force) {
+                                try {
+                                    Path output=Path.of("target/version-risk-desktop/risk.png");Files.createDirectories(output.getParent());
+                                    var root=dialog.getRootPane();var image=new BufferedImage(root.getWidth(),root.getHeight(),BufferedImage.TYPE_INT_RGB);
+                                    var graphics=image.createGraphics();root.printAll(graphics);graphics.dispose();ImageIO.write(image,"png",output.toFile());
+                                } catch(IOException error){throw new RuntimeException(error);}
+                            }
+                            seen.set(true);timer.stop();
+                            pane.setValue(io.github.samlinb.openbone.i18n.M.m(force?"spineImport.force":"spineImport.cancel"));
+                        }
+                    }
+                });
+                timer.start();SwingUtilities.invokeLater(task);return null;
+            });
+            var loaded=task.get(15,TimeUnit.SECONDS);assertTrue(seen.get());
+            if(force){assertNotNull(loaded);assertEquals(1,loaded.document().history().state().model().bones().size());assertTrue(loaded.document().history().isDirty());}
+            else assertNull(loaded);
+            assertArrayEquals(source,Files.readAllBytes(file));
+        }
+    }
+
     @Test void realProjectPreloadsImagesWithoutChangingSourceAndPublishesCacheWithoutRereading() throws Exception {
         Path png = temp.resolve("tile.png"), project = temp.resolve("project.json");
         var pixels = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB); pixels.setRGB(0, 0, 0xff22cc44);

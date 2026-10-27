@@ -39,7 +39,7 @@ Openbone uses its own editable project format and supports importing and exporti
 
 | Item | Limitations |
 | --- | --- |
-| Version & file types | Selecting `.spine` loads a matching exported JSON snapshot, without parsing the native binary; supports bounded 3.8.x and 4.2.22 JSON, not `.skel` |
+| Version & file types | Supported subsets of 3.8/4.0/4.1/4.2/4.3 JSON and skel import/export; native .spine conversion requires a separately configured licensed CLI and remains unverified locally. See [matrix](docs/SPINE_VERSION_COMPATIBILITY.md). |
 | Bones | Only `normal` inheritance mode; bone shear fields and shear animation tracks are not supported |
 | Attachments | Supports Region, Mesh, Clipping, Path; linked mesh, bounding box, point and other attachment types are not supported |
 | Colors & blending | Slots and texture attachments accept white only; blend modes limited to `normal` / `additive`; color animation is not supported |
@@ -105,7 +105,7 @@ java -jar target/openbone-0.1.3.jar --open "path/to/character.json"
 java -jar target/openbone-0.1.3.jar --validate-project "path/to/character.json"
 ```
 
-`--open` and `--validate-project` accept Openbone project files. To import JSON exported from Spine, use "Import 4.2.22 JSON" in the editor. When project validation fails, the process exits with code `2`.
+`--open` and `--validate-project` accept Openbone project files. To import JSON exported from Spine, use "Import Spine Data" in the editor. When project validation fails, the process exits with code `2`.
 
 ## Quick Start
 
@@ -141,16 +141,20 @@ Auto-recovery and layout data live in `%LOCALAPPDATA%/Openbone` on Windows by de
 
 ### 4. Import existing Spine JSON
 
-File → Open also accepts `.spine`, locating `<name>.json` beside it or `export/<name>.json`. This loads the exported snapshot, which may be older than the native project, and reports filtered data; the native binary/editor data is not parsed or preserved losslessly. Missing snapshots require exporting JSON with Spine first. The result is an unsaved Openbone project. `--open res/spineboy/spineboy-pro.spine` uses its existing 3.8.55 JSON and the project's images directory, with automatic framing and normalization of rounded skinning weights. Optional local check: `mvn -Dtest=SpineProjectSourceTest -Dopenbone.spineboy=true test` writes a portable example, report and source license to `target/spineboy-openbone/`.
+File → Open also accepts `.spine`. A separately configured licensed Spine CLI converts actual native project data; without it, OpenBone may load a matching exported JSON snapshot and explicitly warn that it can be older than the project. Native object graphs and editor-only state are not independently decoded. The local Trial installation cannot verify native conversion. See [Spine version compatibility](docs/SPINE_VERSION_COMPATIBILITY.md) for configuration, source analysis and acceptance limits.
 
-1. Prepare exported JSON at version `3.8.x` or `4.2.22` that fits the compatibility scope above.
+1. Prepare exported JSON or skel at version `3.8.x`, `4.0.x`, `4.1.x`, `4.2.x` or `4.3.x` that fits the compatibility scope above.
 2. Place the same-named `.atlas` and its referenced PNGs in position; when using individual images, keep `skeleton.images` and attachment paths resolvable. Relative resource paths must stay inside the imported resource directory.
-3. Choose "File → Import Spine JSON…" and select the skeleton JSON. You may also select `current.json` from an Openbone export asset pack; the editor will parse and validate the pack.
+3. Choose "File → Import Spine Data…" and select the skeleton JSON or supported binary export. You may also select `current.json` from an Openbone export asset pack; the editor will parse and validate the pack.
 4. A successful import produces a new unsaved project — save it as an Openbone project for further editing.
 
 If an import is rejected, check the version, metadata, attachment types, atlas configuration and constraint limits against the field paths in the error message. Changing only the version number does not convert data from other versions.
 
-`3.8.x` imports translate angles, relative Bezier curves, constraint mixes and deform structures. Invalid entries and unsupported fields are filtered with a path report; valid sibling attachments and timelines are retained. Missing images retain their resource links and dimensions; Linear atlas filtering is adapted to Nearest. Shear and special inheritance modes remain unsupported and are reported and filtered. `4.2.22` imports remain strict. Exporting to `3.8.75` rejects physics, proportional path spacing and incompatible independent axis curves/mixes. Packages require valid PNGs. Later official 3.8 runtimes reject the `3.8.75` version marker; use matching older tools, or export `4.2.22` for its matching runtime.
+Spine **3.8/4.0/4.1/4.2/4.3 binary exports** (`.skel`, `.skel.bytes`) can also be imported or opened directly, including `--open res/xiaohei/Ninjahouse_xiaohei.skel`. Matching `.atlas` or `.atlas.txt` files and PNG pages are resolved beside the export. The import uses the shared application service, creates an unsaved editable document, supports portable saving and optional atlas splitting, and preserves source files. `res/xiaohei` (4.0.21) imports 17 bones, 9 slots, 16 attachments, skins `default`/`1`/`3`, and animations `idle`, `idle2`, `move`, `walk`. Select skin `1` or `3` in Resources to show the full character; the source default skin contains only common attachments.
+
+Binary support includes supported region/mesh geometry and weights, animation, deform, draw order, events and representable setup/animated constraints; physics is available in 4.2/4.3. Unsupported types or incompatible downgrades fail before publication. Known families use explicit adapters. Unknown versions first show a risk warning with Cancel as default and Force import; fallback prefers the nearest higher parser of the same format, otherwise the nearest lower. 4.1.9 now uses 4.1 normally; unknown 4.4.9 proposes 4.3. MCP returns structured risk for explicit human approval. See [version matrix](docs/SPINE_VERSION_COMPATIBILITY.md) for precise limits and verification.
+
+`3.8.x` imports translate angles, relative Bezier curves, constraint mixes and deform structures. Invalid entries and unsupported fields are filtered with a path report; valid sibling attachments and timelines are retained. Missing images retain their resource links and dimensions; Linear atlas filtering is adapted to Nearest. Shear and special inheritance modes remain unsupported and are reported and filtered. `4.2.22` imports remain strict. Exporting to 3.8 rejects physics, proportional path spacing and incompatible independent axis curves/mixes. Packages require valid PNGs. Binary export uses 3.8.99; the historical 3.8.75 binary layout is not declared compatible.
 
 ### 5. Export game assets
 
@@ -160,7 +164,7 @@ After importing JSON, the editor offers to split a same-named atlas whose valid 
 
 Slot color playback/import/export supports 3.8 `color` and 4.2 `rgba`, `rgb`, `alpha`, setup tint, linear/stepped/Bezier interpolation and independent RGB/alpha channels. Colors multiply texture samples; alpha also affects picking. Projects containing colors use schema 7; earlier projects remain readable. Exporting independent RGB/alpha to 3.8 requires matching key times and a shared curve. All 14 color tracks in `dandao_1` roundtrip. Optional native rendering check: `mvn -Dtest=SlotColorRenderTest -Dopenbone.verifyGl=true test` generates a contact sheet and portable project in `target/` through the production renderer in a windowless Pbuffer.
 
-Choose "File → Export Spine Package…", pick an output directory, then select `4.2.22` or `3.8.75`. Example export result:
+Choose "File → Export Spine Package…", pick an output directory, then select `3.8.99`, `4.0.64`, `4.1.24`, `4.2.22` or `4.3.26`, and JSON, binary, or native format. Native requires the configured licensed CLI. Example export result:
 
 ```text
 export/

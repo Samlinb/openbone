@@ -11,6 +11,10 @@ final class Spine38Json {
     static final String VERSION = "3.8.75";
     static boolean supports(String version) { return version!=null && version.matches("3\\.8\\.[0-9]+"); }
     private Spine38Json() {}
+    static boolean sameCurve(Curve a,Curve b) {
+        return a.kind()==b.kind()&&Math.abs(a.x1()-b.x1())<1e-9&&Math.abs(a.y1()-b.y1())<1e-9
+            &&Math.abs(a.x2()-b.x2())<1e-9&&Math.abs(a.y2()-b.y2())<1e-9;
+    }
 
     static void fields(ObjectNode n, String p, List<String> warnings, String... names) {
         Set<String> keep = Set.of(names);
@@ -404,7 +408,7 @@ final class Spine38Json {
                         for (int j = 0; j < track.channel().components(); j++) {
                             if (k.values().get(j).equals(next.values().get(j))) continue;
                             var c = k.curves().get(j);
-                            if (shared != null && !shared.equals(c)) throw ProjectCodec.bad("$.animations." + clip.name(), "Spine 3.8 requires the same curve for both axes");
+                            if (shared != null && !sameCurve(shared,c)) throw ProjectCodec.bad("$.animations." + clip.name(), "Spine 3.8 requires the same curve for both axes");
                             shared = c;
                         }
                         if (shared != null) relativeCurve(n, shared);
@@ -440,7 +444,7 @@ final class Spine38Json {
                         for (int j = 0; j < channel.components(); j++) {
                             if (channel.discrete(j) || key.values().get(j).equals(next.values().get(j))) continue;
                             Curve c = key.curves().get(j);
-                            if (shared != null && !shared.equals(c)) throw ProjectCodec.bad("$.animations." + clip.name(), "Spine 3.8 requires a shared constraint curve");
+                            if (shared != null && !sameCurve(shared,c)) throw ProjectCodec.bad("$.animations." + clip.name(), "Spine 3.8 requires a shared constraint curve");
                             shared = c;
                         }
                         if (shared != null) relativeCurve(n, shared);

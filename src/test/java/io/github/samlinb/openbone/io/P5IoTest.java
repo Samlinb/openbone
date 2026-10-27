@@ -116,7 +116,7 @@ class P5IoTest {
     @Test void malformedVersionCycleReferenceNonfiniteAndPathEscapeRefuse() throws Exception {
         var d=model();var baseline=tree(d);
         List<java.util.function.Consumer<ObjectNode>> mutations=List.of(
-            n->((ObjectNode)n.get("skeleton")).put("spine","4.3.26"),n->((ObjectNode)n.get("bones").get(0)).put("parent","tip"),
+            n->((ObjectNode)n.get("skeleton")).put("spine","4.4.26"),n->((ObjectNode)n.get("bones").get(0)).put("parent","tip"),
             n->((ObjectNode)n.get("slots").get(0)).put("bone","absent"),n->((ObjectNode)n.get("slots").get(0)).put("attachment","absent"),
             n->((ObjectNode)n.get("bones").get(0)).put("x",Double.POSITIVE_INFINITY),
             n->((ObjectNode)n.path("skins").get(0).path("attachments").path("槽/~").path("同名")).put("path","../escape"),

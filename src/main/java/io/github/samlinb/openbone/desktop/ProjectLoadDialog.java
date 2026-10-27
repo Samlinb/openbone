@@ -75,9 +75,28 @@ final class ProjectLoadDialog extends JDialog {
     }
 
     static Loaded load(Window owner, Path source, boolean importing) throws Exception {
+        io.github.samlinb.openbone.io.SpineImportPolicy.Approval approval=null;
+        while(true){
+            try{return loadApproved(owner,source,importing,approval);}
+            catch(io.github.samlinb.openbone.io.SpineVersionRiskException risk){
+                if(!owner.isDisplayable()||!confirmVersionRisk(owner,risk))return null;
+                approval=risk.selection().approval();
+            }
+        }
+    }
+
+    private static boolean confirmVersionRisk(Window owner,io.github.samlinb.openbone.io.SpineVersionRiskException risk){
+        String force=m("spineImport.force"),cancel=m("spineImport.cancel");
+        var text=new JTextArea(risk.getMessage(),8,62);text.setEditable(false);text.setLineWrap(true);text.setWrapStyleWord(true);text.setOpaque(false);
+        var pane=new JOptionPane(text,JOptionPane.WARNING_MESSAGE,JOptionPane.DEFAULT_OPTION,null,new Object[]{force,cancel},cancel);
+        var dialog=pane.createDialog(owner,m("spineImport.riskTitle"));dialog.setName("spineImport.versionRisk");
+        try{dialog.setVisible(true);return force.equals(pane.getValue());}finally{dialog.dispose();}
+    }
+
+    private static Loaded loadApproved(Window owner,Path source,boolean importing,io.github.samlinb.openbone.io.SpineImportPolicy.Approval approval)throws Exception{
         return load(owner, source, updates -> {
             var next = new ProjectDocument(DocumentSnapshot.EMPTY);
-            if (importing) next.importSkeleton(source); else next.openResolved(source);
+            if (importing) next.importSkeleton(source,approval); else next.openResolved(source,approval);
             var images = new ImageAssets();
             images.base(next.path().map(Path::getParent).orElse(Path.of("").toAbsolutePath()));
             var sources = next.history().state().model().attachments().stream()

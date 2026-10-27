@@ -18,6 +18,7 @@ import io.github.samlinb.openbone.core.model.*;
  * collection of user files.
  */
 public final class ExportPackage {
+    public enum Format { JSON, BINARY, NATIVE }
     public enum Stage {
         AFTER_STAGE_CREATE, AFTER_IMAGE, AFTER_JSON, AFTER_ATLAS, AFTER_MANIFEST, AFTER_GENERATION, BEFORE_ENTRY
     }
@@ -49,7 +50,15 @@ public final class ExportPackage {
         return publish(directory, d, imageBase, version, true);
     }
 
+    public Path publish(Path directory, DocumentSnapshot d, Path imageBase, String version, Format format) throws IOException {
+        return publish(directory,d,imageBase,version,true,Objects.requireNonNull(format));
+    }
+
     private Path publish(Path directory, DocumentSnapshot d, Path imageBase, String version, boolean compatibleImages) throws IOException {
+        return publish(directory,d,imageBase,version,compatibleImages,Format.JSON);
+    }
+
+    private Path publish(Path directory, DocumentSnapshot d, Path imageBase, String version, boolean compatibleImages, Format format) throws IOException {
         RuntimeRange.validate(d);
         Map<EntityId, String> plannedPaths = new LinkedHashMap<>();
         Map<EntityId, byte[]> plannedImages = new LinkedHashMap<>();
@@ -64,9 +73,16 @@ public final class ExportPackage {
                 if (region != null
                         && (pixels.getWidth() != region.pageWidth() || pixels.getHeight() != region.pageHeight()))
                     throw new IOException("Atlas page dimensions changed: " + a.name());
+                if(format==Format.NATIVE&&region!=null) {
+                    var output=new ByteArrayOutputStream();
+                    javax.imageio.ImageIO.write(AtlasSplitter.unpack(pixels,region),"png",output);
+                    bytes=output.toByteArray();
+                }
                 plannedImages.put(a.id(), bytes);
             }
         byte[] plannedSkeleton = new SkeletonJsonCodec().encode(d, plannedPaths, "images/", version);
+        byte[] plannedBinary = format==Format.BINARY?SpineBinaryWriter.encode(d,plannedPaths,"images/",version):null;
+        if(format==Format.NATIVE)SpineCliBridge.requireAvailable();
         Path root = directory.toAbsolutePath().normalize();
         if (Files.isSymbolicLink(root))
             throw new IOException("Export directory may not be a symlink");
@@ -96,7 +112,7 @@ public final class ExportPackage {
             checkpoint.at(Stage.AFTER_IMAGE, stage);
             // Copy an original page per attachment; preserve rotation/trim metadata and PNG
             // bytes.
-            var region = d.resources().atlas().get(r.id());
+            var region = format==Format.NATIVE?null:d.resources().atlas().get(r.id());
             if (region != null) {
                 atlas.append(relative).append('\n').append("size: ").append(region.pageWidth()).append(',')
                         .append(region.pageHeight())
@@ -120,6 +136,11 @@ public final class ExportPackage {
         byte[] skeleton = plannedSkeleton;
         write(stage.resolve("skeleton.json"), skeleton);
         hashes.put("skeleton.json", ResourcePaths.sha(skeleton));
+        if(plannedBinary!=null){write(stage.resolve("skeleton.skel"),plannedBinary);hashes.put("skeleton.skel",ResourcePaths.sha(plannedBinary));}
+        if(format==Format.NATIVE){
+            SpineCliBridge.importProject(stage.resolve("skeleton.json"),stage.resolve("skeleton.spine"),version);
+            hashes.put("skeleton.spine",ResourcePaths.sha(ResourcePaths.bytes(stage.resolve("skeleton.spine"),64*1024*1024)));
+        }
         checkpoint.at(Stage.AFTER_JSON, stage);
         byte[] atlasBytes = atlas.toString().getBytes(StandardCharsets.UTF_8);
         write(stage.resolve("skeleton.atlas"), atlasBytes);
@@ -138,7 +159,7 @@ public final class ExportPackage {
                         ResourcePaths.sha(manifest)));
         checkpoint.at(Stage.BEFORE_ENTRY, published);
         entry.write(root.resolve("current.json"), pointer);
-        return published.resolve("skeleton.json");
+        return published.resolve(format==Format.BINARY?"skeleton.skel":format==Format.NATIVE?"skeleton.spine":"skeleton.json");
     }
 
     private static void write(Path path, byte[] bytes) throws IOException {
@@ -173,7 +194,7 @@ public final class ExportPackage {
         var m = new ProjectCodec().parseTree(manifest);
         ProjectCodec.fields(m, "$", "format", "spine", "files");
         if (!m.path("format").asText().equals("openbone-export-generation-1")
-                || !Set.of(SkeletonJsonCodec.VERSION, SkeletonJsonCodec.VERSION_38).contains(m.path("spine").asText()) || !m.path("files").isObject())
+                || SpineVersion.identify(m.path("spine").asText()).isEmpty() || !m.path("files").isObject())
             throw new IOException("Invalid generation manifest");
         if (!m.get("files").has("skeleton.json") || !m.get("files").has("skeleton.atlas"))
             throw new IOException("Incomplete generation manifest");

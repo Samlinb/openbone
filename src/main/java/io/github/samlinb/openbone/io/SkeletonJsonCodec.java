@@ -21,13 +21,24 @@ public final class SkeletonJsonCodec {
     private final ObjectMapper json = new ObjectMapper();
     private final List<String> warnings = new ArrayList<>();
     private final Map<Path,java.awt.image.BufferedImage> importedImages = new HashMap<>();
+    private String sourceVersion;
+    /** Actual source header version, separate from the translated internal JSON contract. */
+    public Optional<String> sourceVersion() { return Optional.ofNullable(sourceVersion); }
     public List<String> warnings() { return warnings.stream().distinct().toList(); }
+
+    /** Compatibility policies do not select a wire format or perform schema conversion.
+     * Only SPINE_38_JSON enters Spine38Json.normalize/recover38; binary 4.0 is already translated. */
+    private enum ImportMode {
+        STRICT_42, SPINE_38_JSON, SPINE_40_BINARY, SPINE_VERSION_JSON;
+        boolean compatibleResources() { return this != STRICT_42; }
+    }
 
     public byte[] encode(DocumentSnapshot d, Map<EntityId, String> regionPaths, String images, String version) throws IOException {
         if (VERSION.equals(version)) return encode(d, regionPaths, images);
-        if (!VERSION_38.equals(version)) throw ProjectCodec.bad("$.skeleton.spine", "Unsupported version: " + version);
+        var target=SpineVersion.target(version);
         ObjectNode root = (ObjectNode)json.readTree(encode(d, regionPaths, images));
-        Spine38Json.export(root, d);
+        if(target.legacy())Spine38Json.export(root, d);
+        SpineVersionJson.export(root,target,version);
         byte[] bytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(root);
         if (bytes.length > ProjectCodec.MAX_BYTES) throw new ProjectFormatException("Export exceeds 16 MiB");
         return bytes;
@@ -304,14 +315,27 @@ public final class SkeletonJsonCodec {
     }
 
     public DocumentSnapshot read(Path file, Path imageBase) throws IOException {
+        return read(file,imageBase,null);
+    }
+
+    public DocumentSnapshot read(Path file, Path imageBase, SpineImportPolicy.Approval approval) throws IOException {
+        sourceVersion = null;
+        warnings.clear();
+        importedImages.clear();
+        if (Spine40Binary.isBinary(file)) {
+            var decoded = Spine40Binary.decode(ResourcePaths.bytes(file, ProjectCodec.MAX_BYTES),approval);
+            var atlas = AtlasSubset.read(file.toAbsolutePath().normalize(), true, warnings);
+            var document = decodeTree(decoded.tree(), imageBase.toAbsolutePath().normalize(), atlas, ImportMode.SPINE_40_BINARY);
+            sourceVersion = decoded.sourceVersion();
+            if(!decoded.selection().known())warnings.add(decoded.selection().message());
+            return document;
+        }
         ProjectCodec.requireProjectPath(file);
         byte[] bytes;
         try (var in = Files.newInputStream(file)) {
             bytes = in.readNBytes(ProjectCodec.MAX_BYTES + 1);
         }
-        boolean legacy = Spine38Json.supports(new ProjectCodec().parseTree(bytes).path("skeleton").path("spine").asText());
-        warnings.clear();
-        importedImages.clear();
+        boolean legacy = SpineImportPolicy.select(bytes,SpineImportPolicy.Format.JSON,approval).parser()!=SpineImportPolicy.Parser.JSON_42;
         Map<String, AtlasSubset.Region> atlas;
         try { atlas = AtlasSubset.read(file.toAbsolutePath().normalize(), legacy, warnings); }
         catch (IOException invalidAtlas) {
@@ -319,31 +343,46 @@ public final class SkeletonJsonCodec {
             warnings.add("atlas: invalid configuration filtered; using image links: " + invalidAtlas.getMessage());
             atlas = null;
         }
-        return decode(bytes, imageBase.toAbsolutePath().normalize(), atlas);
+        return decode(bytes, imageBase.toAbsolutePath().normalize(), atlas,approval);
     }
 
     public DocumentSnapshot decode(byte[] bytes, Path base) throws IOException {
+        sourceVersion = null;
         warnings.clear();
         importedImages.clear();
-        return decode(bytes, base, null);
+        return decode(bytes, base, null,null);
     }
 
-    private DocumentSnapshot decode(byte[] bytes, Path base, Map<String, AtlasSubset.Region> atlas) throws IOException {
+    private DocumentSnapshot decode(byte[] bytes, Path base, Map<String, AtlasSubset.Region> atlas, SpineImportPolicy.Approval approval) throws IOException {
         var root = new ProjectCodec().parseTree(bytes);
-        boolean legacy = Spine38Json.supports(root.path("skeleton").path("spine").asText());
+        String version = root.path("skeleton").path("spine").asText();
+        var selection=SpineImportPolicy.select(bytes,SpineImportPolicy.Format.JSON,approval);
+        if(!selection.known())warnings.add(selection.message());
+        boolean legacy = selection.parser()==SpineImportPolicy.Parser.JSON_38;
         if (legacy) {
             try(var cache=io.github.samlinb.openbone.core.math.MeshTopology.cacheValidations()) {
+                ((ObjectNode)root.path("skeleton")).put("spine",Spine38Json.VERSION);
                 root = Spine38Json.normalize(root, warnings);
-                try { return decodeTree(root, base, atlas, true); }
+                try {
+                    var document = decodeTree(root, base, atlas, ImportMode.SPINE_38_JSON);
+                    sourceVersion = version;
+                    return document;
+                }
                 catch (ProjectFormatException invalid) {
-                    return recover38((ObjectNode)root, base, atlas, invalid);
+                    var document = recover38((ObjectNode)root, base, atlas, invalid);
+                    sourceVersion = version;
+                    return document;
                 }
             }
         }
-        return decodeTree(root, base, atlas, false);
+        root=SpineVersionJson.normalize((ObjectNode)root,selection.parser().family());
+        var document = decodeTree(root, base, atlas, selection.parser()==SpineImportPolicy.Parser.JSON_42 ? ImportMode.STRICT_42 : ImportMode.SPINE_VERSION_JSON);
+        sourceVersion = version;
+        return document;
     }
 
-    private DocumentSnapshot decodeTree(JsonNode root, Path base, Map<String, AtlasSubset.Region> atlas, boolean legacy) throws IOException {
+    private DocumentSnapshot decodeTree(JsonNode root, Path base, Map<String, AtlasSubset.Region> atlas, ImportMode mode) throws IOException {
+        boolean compatibleResources = mode.compatibleResources();
         List<String> unsupported = new ArrayList<>();
         scan(root, unsupported);
         if (!unsupported.isEmpty())
@@ -477,11 +516,11 @@ public final class SkeletonJsonCodec {
                                 // Legacy editor import uses the viewport decoder, not runtime export's
                                 // color-management restrictions. Keep the original linked image bytes.
                                 pixels=io.github.samlinb.openbone.viewport.ImageAssets.decodePng(
-                                        legacy ? ResourcePaths.png(png) : RuntimePng.read(png));
+                                        compatibleResources ? ResourcePaths.png(png) : RuntimePng.read(png));
                                 importedImages.put(png,pixels);
                             }
                         } catch (IOException invalidImage) {
-                            if (!legacy) throw invalidImage;
+                            if (!compatibleResources) throw invalidImage;
                             warnings.add(p + ": image unavailable; resource link retained: " + png
                                     + "; reason: " + invalidImage.getMessage());
                         }
@@ -526,9 +565,9 @@ public final class SkeletonJsonCodec {
                                     try { Influence.validate(row); }
                                     catch(IllegalArgumentException invalid) {
                                         double total=row.stream().mapToDouble(Influence::weight).sum();
-                                        if(!legacy || Math.abs(total-1)>.001) throw invalid;
+                                        if(!compatibleResources || Math.abs(total-1)>.001) throw invalid;
                                         row=new ArrayList<>(Influence.normalize(row));
-                                        warnings.add(p+".vertices: normalized rounded 3.8 weights");
+                                        warnings.add(io.github.samlinb.openbone.i18n.M.m("spineImport.roundedWeights"));
                                     }
                                     weights.add(row);
                                 }
@@ -751,7 +790,7 @@ public final class SkeletonJsonCodec {
                     new Resources(importedSkins.size() == 1 && importedSkins.get(0).name().equals("default") ? List.of()
                             : importedSkins, "default", eventDefinitions, atlasMetadata, SpineMetadataJson.readRuntime(root, attachmentIds)));
             // Runtime export certificates must not delete valid editable source data.
-            if (!legacy) RuntimeRange.validate(d);
+            if (mode == ImportMode.STRICT_42) RuntimeRange.validate(d);
             return d;
         } catch (IllegalArgumentException | NullPointerException e) {
             throw new ProjectFormatException("Invalid 4.2.22 model: " + e.getMessage(), e);
@@ -768,7 +807,7 @@ public final class SkeletonJsonCodec {
         for (var skin : clean.path("skins")) ((ObjectNode)skin).putObject("attachments");
         for (var slot : clean.path("slots")) ((ObjectNode)slot).remove("attachment");
         // The skeleton is the irreducible foundation. Do not publish an invalid hierarchy.
-        decodeTree(clean, base, atlas, true);
+        decodeTree(clean, base, atlas, ImportMode.SPINE_38_JSON);
         for (var it = source.path("events").fields(); it.hasNext();) {
             var entry = it.next();
             clean = accept38(clean, base, atlas, "$.events." + entry.getKey(),
@@ -833,7 +872,7 @@ public final class SkeletonJsonCodec {
                 }
             }
         }
-        return decodeTree(clean, base, atlas, true);
+        return decodeTree(clean, base, atlas, ImportMode.SPINE_38_JSON);
     }
 
     private ObjectNode accept38(ObjectNode current, Path base, Map<String, AtlasSubset.Region> atlas,
@@ -842,7 +881,7 @@ public final class SkeletonJsonCodec {
         int count = warnings.size();
         try {
             edit.accept(candidate);
-            decodeTree(candidate, base, atlas, true);
+            decodeTree(candidate, base, atlas, ImportMode.SPINE_38_JSON);
             return candidate;
         } catch (ProjectFormatException | IllegalArgumentException invalid) {
             warnings.add(path + ": filtered invalid configuration: " + invalid.getMessage());

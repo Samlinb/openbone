@@ -3,5 +3,4 @@
 __pycache__/
 res/
 AGENTS.md
-docs/
-docs/PROJECT_DRIVEN_DEVELOPMENT.md
+docs/*

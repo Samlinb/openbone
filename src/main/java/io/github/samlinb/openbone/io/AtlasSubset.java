@@ -24,9 +24,8 @@ final class AtlasSubset {
     }
 
     static Map<String, Region> read(Path json, boolean legacy, List<String> warnings) throws IOException {
-        String filename = json.getFileName().toString();
-        int dot = filename.lastIndexOf('.');
-        Path atlas = json.resolveSibling((dot < 0 ? filename : filename.substring(0, dot)) + ".atlas");
+        Path atlas = json.resolveSibling(Spine40Binary.stem(json) + ".atlas");
+        if (!Files.exists(atlas)) atlas = json.resolveSibling(Spine40Binary.stem(json) + ".atlas.txt");
         if (!Files.exists(atlas))
             return null;
         String atlasText = new String(ResourcePaths.bytes(atlas, ProjectCodec.MAX_BYTES),
@@ -38,7 +37,7 @@ final class AtlasSubset {
             return Map.of();
         if (legacy) {
             String adjusted = atlasText.replaceAll("(?m)^(\\s*filter:\\s*)Linear\\s*,\\s*Linear\\s*$", "$1Nearest,Nearest");
-            if (!adjusted.equals(atlasText)) warnings.add("atlas.filter: Linear filtering imported as Nearest");
+            if (!adjusted.equals(atlasText)) warnings.add(io.github.samlinb.openbone.i18n.M.m("spineImport.nearestFilter"));
             atlasText = adjusted;
         }
         validateSyntax(atlasText, atlas.getFileName().toString());

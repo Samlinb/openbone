@@ -1,0 +1,4 @@
+Regression fixture copied unchanged from the user-provided res/xiaohei export.
+Ninjahouse_xiaohei.skel and .skel.bytes are identical Spine 4.0.21 binary exports.
+The atlas and PNG are the matching original texture resources.
+These files are test inputs, not OpenBone runtime dependencies or generated artwork.
