@@ -1,12 +1,33 @@
 name: Maven Package
 
 on:
-  release:
-    types: [created]
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
+  # Published releases are immutable, so assets must be attached while the
+  # release is still a draft and the release published afterwards.
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Create draft release for tag
+      if: github.event_name == 'push'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ github.ref_name }}
+      run: |
+        if gh release view "$TAG" --json name,isDraft > /dev/null 2>&1; then
+          echo "Release $TAG already exists, assets will be attached to it."
+        else
+          gh release create "$TAG" --draft --title "$TAG" --generate-notes
+        fi
+
   build:
+    needs: create-release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -25,26 +46,29 @@ jobs:
         cache: maven
 
     - name: Verify with Maven
-      if: github.event_name != 'release'
+      if: github.event_name != 'push'
       run: xvfb-run -a mvn -B verify --file pom.xml
 
     - name: Build and Publish with Maven
-      if: github.event_name == 'release'
+      if: github.event_name == 'push'
       run: xvfb-run -a mvn -B deploy -s $GITHUB_WORKSPACE/settings.xml --file pom.xml
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
    
     - name: Upload Release Asset
-      if: github.event_name == 'release'
+      if: github.event_name == 'push'
       uses: softprops/action-gh-release@v2
       with:
+        tag_name: ${{ github.ref_name }}
+        draft: true
         files: target/OpenBone-*.jar
         fail_on_unmatched_files: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   windows:
+    needs: create-release
     runs-on: windows-latest
     permissions:
       contents: write
@@ -67,8 +91,25 @@ jobs:
         path: target/dist/*
         if-no-files-found: error
     - name: Upload Windows release assets
-      if: github.event_name == 'release'
+      if: github.event_name == 'push'
       uses: softprops/action-gh-release@v2
       with:
+        tag_name: ${{ github.ref_name }}
+        draft: true
         files: target/dist/*
         fail_on_unmatched_files: true
+
+  publish-release:
+    needs: [build, windows]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Publish draft release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        TAG: ${{ github.ref_name }}
+      run: |
+        gh release view "$TAG" --json assets --jq '.assets[].name'
+        gh release edit "$TAG" --draft=false
