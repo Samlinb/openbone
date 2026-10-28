@@ -16,6 +16,77 @@ import static io.github.samlinb.openbone.TestData.id;
 import static org.junit.jupiter.api.Assertions.*;
 
 class AnimationPlaybackTest {
+    @Test void sequenceCarriesDelayedTicksAcrossActionsAndStopsAtFinalPose() throws Exception {
+        onEdt(h -> {
+            h.panel.remoteSequence(List.of(id(30), id(31), id(30)), false);
+            h.tick(1.25);
+            assertEquals(id(31), h.panel.active());
+            assertEquals(.25, h.panel.time());
+            assertEquals(List.of(0., .5, 1., 0.), h.eventTimes());
+            h.tick(2.5);
+            assertEquals(id(30), h.panel.active());
+            assertEquals(.5, h.panel.time());
+            assertEquals(List.of(0., .5, 1., 0., .5, 1., 0., .5), h.eventTimes());
+            h.tick(4);
+            assertFalse(h.panel.playing());
+            assertEquals(1, h.panel.time());
+            assertEquals(9, h.events().size());
+            h.click("animation.play");
+            assertTrue(h.panel.playing());
+            assertEquals(0, h.panel.time());
+            assertEquals(List.of(0.), h.eventTimes());
+        });
+    }
+
+    @Test void sequenceLoopsWholeQueueAndPausesResumesWithoutDuplicateEvents() throws Exception {
+        onEdt(h -> {
+            h.panel.remoteSequence(List.of(id(30), id(31)), true);
+            h.tick(2);
+            assertEquals(id(30), h.panel.active());
+            assertEquals(0, h.panel.time());
+            assertEquals(7, h.events().size());
+            h.now.set(2_250_000_000L);
+            h.click("animation.play");
+            assertFalse(h.panel.playing());
+            h.tick(10);
+            assertEquals(.25, h.panel.time());
+            h.click("animation.play");
+            h.tick(10.25);
+            assertEquals(.5, h.panel.time());
+            assertEquals(8, h.events().size());
+            h.click("animation.loop");
+            h.tick(11.75);
+            assertFalse(h.panel.playing());
+            assertEquals(id(31), h.panel.active());
+            assertEquals(1, h.panel.time());
+        });
+    }
+
+    @Test void sequenceConfigurationIsAtomicAndSeekingExitsSequence() throws Exception {
+        onEdt(h -> {
+            h.panel.configureSequence(List.of(id(31), id(30)));
+            h.click("animation.loop"); // Changing repeat before first play must retain the zero event.
+            h.click("animation.play");
+            assertEquals(List.of(0.), h.eventTimes());
+            var state = h.panel.sequenceState();
+            assertThrows(IllegalArgumentException.class, () -> h.panel.configureSequence(List.of(id(30), id(999))));
+            assertEquals(state, h.panel.sequenceState());
+            assertTrue(h.panel.playing());
+            h.tick(1.25);
+            assertEquals(id(30), h.panel.active());
+            h.click("animation.start");
+            assertEquals(id(31), h.panel.active());
+            assertEquals(0, h.panel.time());
+            assertFalse(h.panel.playing());
+            assertEquals(true, h.panel.sequenceState().get("enabled"));
+            h.panel.remoteSeek(id(30), .5);
+            assertEquals(false, h.panel.sequenceState().get("enabled"));
+            assertFalse(h.panel.playing());
+            h.panel.reset();
+            assertEquals(List.of(), h.panel.sequenceState().get("animationIds"));
+        });
+    }
+
     @Test void desktopDisablingLoopSettlesPendingEventsAndFinishesCurrentCycle() throws Exception {
         onEdt(h -> {
             h.click("animation.loop");
@@ -118,7 +189,8 @@ class AnimationPlaybackTest {
     }
 
     private static final class Harness implements AnimationPanel.Host {
-        final DocumentSnapshot document = P8ModelTest.sample();
+        final DocumentSnapshot document = io.github.samlinb.openbone.application.ExtendedEdits
+                .duplicateAnimation(P8ModelTest.sample(), id(30), id(31), "second");
         final CommandHistory history = new CommandHistory(document);
         final Map<String, JComponent> controls = new HashMap<>();
         final List<Exception> errors = new ArrayList<>();

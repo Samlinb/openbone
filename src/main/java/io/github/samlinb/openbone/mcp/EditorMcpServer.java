@@ -25,15 +25,25 @@ public final class EditorMcpServer implements AutoCloseable {
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     private final HttpServer server;
     private final ExecutorService executor;
-    private final EditorMcpTools tools;
-    private final byte[] authorization;
+    public record Endpoint(String token, EditorMcpTools tools) {
+        public Endpoint {
+            Objects.requireNonNull(tools);
+            if (token != null && !token.isEmpty() && !token.matches("[A-Za-z0-9_-]{32,256}"))
+                throw new IllegalArgumentException(io.github.samlinb.openbone.i18n.M.m("isolation.config"));
+        }
+        @Override public String toString() { return "Endpoint[credentials=redacted]"; }
+    }
+    private final Map<String, Endpoint> endpoints;
 
     public EditorMcpServer(int port, String token, EditorMcpTools tools) throws IOException {
-        if (token != null && !token.isEmpty() && !token.matches("[A-Za-z0-9_-]{32,256}"))
-            throw new IllegalArgumentException("MCP token must contain 32 to 256 ASCII letters, digits, underscores or hyphens.");
-        this.tools = Objects.requireNonNull(tools);
-        // Local clients are trusted by default; only an explicitly supplied token enables authentication.
-        authorization = token == null || token.isEmpty() ? null : ("Bearer " + token).getBytes(StandardCharsets.UTF_8);
+        this(port, Map.of("/mcp", new Endpoint(token, tools)));
+    }
+
+    /** Explicit endpoint bindings; requests never choose a project through tool arguments. */
+    public EditorMcpServer(int port, Map<String, Endpoint> endpoints) throws IOException {
+        if (endpoints.isEmpty() || endpoints.keySet().stream().anyMatch(p -> !p.matches("/mcp(?:/[a-zA-Z0-9_-]+)?")))
+            throw new IllegalArgumentException(io.github.samlinb.openbone.i18n.M.m("isolation.config"));
+        this.endpoints = Map.copyOf(endpoints);
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 16);
         executor = new ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS, new ArrayBlockingQueue<>(16), runnable -> {
             var t = new Thread(runnable, "openbone-mcp"); t.setDaemon(true); return t;
@@ -47,12 +57,16 @@ public final class EditorMcpServer implements AutoCloseable {
 
     private void handle(HttpExchange exchange) throws IOException {
         try (exchange) {
-            if (!exchange.getRequestURI().getPath().equals("/mcp") || exchange.getRequestURI().getRawQuery() != null) { send(exchange, 404, null); return; }
+            Endpoint endpoint = endpoints.get(exchange.getRequestURI().getRawPath());
+            if (endpoint == null || exchange.getRequestURI().getRawQuery() != null) { send(exchange, 404, null); return; }
             int port = server.getAddress().getPort();
             String host = exchange.getRequestHeaders().getFirst("Host");
             if (!Set.of("127.0.0.1:" + port, "localhost:" + port).contains(Objects.toString(host, ""))) { send(exchange, 403, null); return; }
             String origin = exchange.getRequestHeaders().getFirst("Origin");
             if (origin != null && !Set.of("http://127.0.0.1:" + port, "http://localhost:" + port).contains(origin)) { send(exchange, 403, null); return; }
+            EditorMcpTools tools = endpoint.tools();
+            byte[] authorization = endpoint.token() == null || endpoint.token().isEmpty() ? null
+                    : ("Bearer " + endpoint.token()).getBytes(StandardCharsets.UTF_8);
             byte[] supplied = Objects.toString(exchange.getRequestHeaders().getFirst("Authorization"), "").getBytes(StandardCharsets.UTF_8);
             if (authorization != null && !MessageDigest.isEqual(authorization, supplied)) {
                 exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer"); send(exchange, 401, null); return;
@@ -92,7 +106,7 @@ public final class EditorMcpServer implements AutoCloseable {
                     var initialized = json.createObjectNode().put("protocolVersion", VERSIONS.contains(params.get("protocolVersion").asText()) ? params.get("protocolVersion").asText() : PROTOCOL);
                     initialized.putObject("serverInfo").put("name", "openbone").put("version", io.github.samlinb.openbone.EditorApplication.version());
                     initialized.putObject("capabilities").putObject("tools").put("listChanged", false);
-                    initialized.put("instructions", "Operate the currently open OpenBone editor. Read context for mcpApiVersion and capabilities, then query scene before editing. Use exact UUIDs, expectedRevision and a unique requestId; retain identical arguments on retries. Batches are atomic and undoable. Preview captures use the real GL viewport. Project save/load, playback, Spine export and asynchronous MP4 rendering are available. Loading dirty projects requires explicit dirtyPolicy. Poll render_status for media jobs; active media export makes mutation and viewport-control tools busy until completion or cancellation.");
+                    initialized.put("instructions", io.github.samlinb.openbone.i18n.M.m("mcp.sessionInstructions"));
                     result = initialized;
                 }
                 case "ping" -> result = json.createObjectNode();
@@ -131,5 +145,5 @@ public final class EditorMcpServer implements AutoCloseable {
         exchange.getResponseBody().write(bytes);
     }
 
-    @Override public void close() { tools.close(); server.stop(0); executor.shutdownNow(); }
+    @Override public void close() { server.stop(0); executor.shutdownNow(); endpoints.values().forEach(e -> e.tools().close()); }
 }

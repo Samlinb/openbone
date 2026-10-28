@@ -30,6 +30,126 @@ class McpDesktopTest {
     String url, token;
     int sequence;
 
+    @Test void sequencePlaysAcrossActionsThroughHttpAndRendersCurrentGlPose() throws Exception {
+        String oldState = System.getProperty("openbone.userState"), oldPort = System.getProperty("openbone.mcp.port");
+        System.setProperty("openbone.userState", temp.resolve("sequence-state").toString());
+        System.setProperty("openbone.mcp.port", "0");
+        McpConnectionSettings.save(McpConnectionSettings.path(), new McpConnectionSettings.State(39871, true, ""));
+        EntityId bone = EntityId.create(), slot = EntityId.create(), attachment = EntityId.create();
+        EntityId first = EntityId.create(), second = EntityId.create();
+        Path texture = temp.resolve("sequence-texture.png");
+        createFixture(texture, new java.awt.Color(240, 120, 40));
+        var model = new DocumentSnapshot(List.of(new Bone(bone, "root", null, Transform.IDENTITY, 80)),
+                List.of(new Slot(slot, "body", bone, attachment)),
+                List.of(new RegionAttachment(attachment, "body", slot, texture.toString(), Transform.IDENTITY, 90, 90)),
+                List.of(new AnimationClip(first, "first", List.of()), new AnimationClip(second, "second", List.of())));
+        model = io.github.samlinb.openbone.application.AnimationEdits.put(model, first, bone, Channel.ROTATE, .3, List.of(0.));
+        model = io.github.samlinb.openbone.application.AnimationEdits.put(model, second, bone, Channel.ROTATE, 0, List.of(90.));
+        model = io.github.samlinb.openbone.application.AnimationEdits.put(model, second, bone, Channel.ROTATE, 5, List.of(90.));
+        Path project = temp.resolve("sequence.openbone.json");
+        byte[] original = new ProjectCodec().encode(model); Files.write(project, original);
+        Path evidence = Path.of("target/sequence-validation").toAbsolutePath(); Files.createDirectories(evidence);
+        try {
+            edt(() -> { frame = new EditorFrame(project); frame.setSize(1200, 850); frame.showEditor(); return null; });
+            awaitMcpStarted();
+            edt(() -> { url = ((EditorMcpServer) field("mcpServer")).url(); token = (String) field("mcpToken"); return null; });
+            String revision = data(call("openbone_get_context", Map.of())).path("revision").asText();
+            var before = image(call("openbone_capture_preview", Map.of("animationId", first.value(), "time", 0,
+                    "fit", true, "showBones", false, "showGrid", false, "expectedRevision", revision)));
+            ImageIO.write(before, "PNG", evidence.resolve("first.png").toFile());
+            var args = Map.of("action", "sequence", "animationIds", List.of(first.value(), second.value()), "loop", false,
+                    "expectedRevision", revision, "requestId", "play-sequence");
+            var started = data(call("openbone_control_view", args));
+            assertTrue(started.path("view").path("sequence").path("enabled").asBoolean());
+            for (String invalidRevision : List.of(revision, "stale")) {
+                var invalid = new LinkedHashMap<String, Object>(args);
+                invalid.put("animationIds", List.of(first.value(), bone.value()));
+                invalid.put("expectedRevision", invalidRevision);
+                invalid.put("requestId", "invalid-sequence-" + invalidRevision);
+                assertTrue(rpc("tools/call", Map.of("name", "openbone_control_view", "arguments", invalid))
+                        .path("result").path("isError").asBoolean());
+                assertTrue(edt(() -> ((AnimationPanel) field("animation")).playing()));
+            }
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(8);
+            while (!edt(() -> ((AnimationPanel) field("animation")).active().equals(second)) && System.nanoTime() < deadline)
+                Thread.sleep(20);
+            var paused = data(call("openbone_control_view", Map.of("action", "pause", "expectedRevision", revision, "requestId", "pause-sequence")));
+            assertEquals(second.value(), paused.path("view").path("animationId").asText());
+            assertEquals(1, paused.path("view").path("sequence").path("index").asInt());
+            assertFalse(paused.path("view").path("playing").asBoolean());
+            assertEquals(0, paused.path("undoCount").asInt());
+            assertEquals(revision, paused.path("revision").asText());
+            assertEquals(started, data(call("openbone_control_view", args))); // Retry cannot restart a paused queue.
+            assertFalse(edt(() -> ((AnimationPanel) field("animation")).playing()));
+            var viewport = edt(() -> (io.github.samlinb.openbone.viewport.EditorViewport) field("viewport"));
+            var after = edt(() -> viewport.capture(() -> {})).get(10, TimeUnit.SECONDS); // Actual current queue pose, no seek.
+            ImageIO.write(after, "PNG", evidence.resolve("second.png").toFile());
+            int differences = 0;
+            for (int y = 0; y < Math.min(before.getHeight(), after.getHeight()); y++)
+                for (int x = 0; x < Math.min(before.getWidth(), after.getWidth()); x++)
+                    if (before.getRGB(x, y) != after.getRGB(x, y)) differences++;
+            assertTrue(differences > 100, "The next action must reach the actual GL framebuffer");
+            edt(() -> {
+                var screenshot = new BufferedImage(frame.getWidth(), frame.getHeight(), BufferedImage.TYPE_INT_ARGB);
+                var graphics = screenshot.createGraphics();
+                frame.printAll(graphics);
+                var origin = SwingUtilities.convertPoint(viewport.canvas(), 0, 0, frame);
+                graphics.drawImage(after, origin.x, origin.y, null);
+                graphics.dispose();
+                ImageIO.write(screenshot, "PNG", evidence.resolve("workspace.png").toFile());
+                return null;
+            });
+            assertArrayEquals(original, Files.readAllBytes(project));
+            assertFalse(edt(() -> frame.history().isDirty()));
+            edt(() -> {
+                var failure = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+                SwingUtilities.invokeLater(() -> {
+                    for (var window : java.awt.Window.getWindows())
+                        if (window instanceof javax.swing.JDialog dialog && dialog.isShowing()) {
+                            try {
+                                var list = (javax.swing.JList<?>) named(dialog, "sequence.queue");
+                                list.setSelectedIndex(1);
+                                ((javax.swing.JButton) named(dialog, "sequence.up")).doClick(0);
+                                assertEquals("second", list.getModel().getElementAt(0).toString());
+                                ((javax.swing.JButton) named(dialog, "sequence.add")).doClick(0);
+                                assertEquals(3, list.getModel().getSize());
+                                ((javax.swing.JButton) named(dialog, "sequence.remove")).doClick(0);
+                                assertEquals(2, list.getModel().getSize());
+                                ((javax.swing.JButton) named(dialog, "sequence.down")).doClick(0);
+                                var screenshot = new BufferedImage(dialog.getWidth(), dialog.getHeight(), BufferedImage.TYPE_INT_ARGB);
+                                var graphics = screenshot.createGraphics(); dialog.printAll(graphics); graphics.dispose();
+                                ImageIO.write(screenshot, "PNG", evidence.resolve("playlist.png").toFile());
+                                ((javax.swing.JOptionPane) SwingUtilities.getAncestorOfClass(javax.swing.JOptionPane.class, list))
+                                        .setValue(io.github.samlinb.openbone.i18n.M.m("sequence.play"));
+                            } catch (Throwable error) { failure.set(error); }
+                            finally { dialog.dispose(); }
+                        }
+                });
+                ((javax.swing.JButton) named(frame, "animation.sequence")).doClick(0);
+                assertNull(failure.get(), () -> String.valueOf(failure.get()));
+                var panel = (AnimationPanel) field("animation");
+                assertTrue(panel.playing());
+                assertEquals(second, panel.active());
+                assertEquals(List.of(second.value(), first.value()), panel.sequenceState().get("animationIds"));
+                panel.remoteControl("pause", null, null, null);
+                return null;
+            });
+        } finally {
+            if (frame != null) edt(() -> { if (frame.isDisplayable()) { frame.history().markSaved(); invoke("closeRequested"); } return null; });
+            restore("openbone.userState", oldState); restore("openbone.mcp.port", oldPort);
+        }
+    }
+
+    private static java.awt.Component named(java.awt.Component component, String name) {
+        if (name.equals(component.getName())) return component;
+        if (component instanceof java.awt.Container container)
+            for (var child : container.getComponents()) {
+                var found = named(child, name);
+                if (found != null) return found;
+            }
+        return null;
+    }
+
     @Test void stretchymanOfficialExportLoadsDeformsRendersEditsAndUndoesThroughMcp() throws Exception {
         String oldState=System.getProperty("openbone.userState"),oldPort=System.getProperty("openbone.mcp.port");
         System.setProperty("openbone.userState",temp.resolve("stretchyman-state").toString());

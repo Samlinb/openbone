@@ -4,4 +4,8 @@ __pycache__/
 res/
 AGENTS.md
 docs/*
+/runtime-preview/target/
+/web-runtime/official/node_modules/
+/web-runtime/official/dist/
 creations/
+web-runtime/

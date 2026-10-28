@@ -20,6 +20,14 @@ public final class EditorApplication {
     }
 
     public static void main(String[] args) {
+        if (args.length > 0 && "--headless".equals(args[0])) {
+            try { io.github.samlinb.openbone.headless.HeadlessApplication.run(args); }
+            catch (Exception failure) {
+                System.err.println(java.util.Objects.toString(failure.getMessage(), failure.getClass().getSimpleName()));
+                System.exit(2);
+            }
+            return;
+        }
         // Keep Swing's Windows surfaces on the software/GDI pipeline alongside the
         // heavyweight
         // LWJGL OpenGL canvas. Set before Toolkit initialization; callers can

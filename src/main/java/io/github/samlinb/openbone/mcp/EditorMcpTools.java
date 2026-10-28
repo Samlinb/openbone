@@ -16,6 +16,16 @@ import javax.swing.SwingUtilities;
 /** MCP's domain boundary. All editor state access, including reads, runs on EDT. */
 public final class EditorMcpTools implements AutoCloseable {
     public interface Host {
+        default String accessDescription() { return ""; }
+        /** Immutable host policy, executed off EDT before any file access. */
+        default void validateArguments(String name, JsonNode arguments) throws Exception {}
+        default void loadProject(ProjectDocument target, Path path, io.github.samlinb.openbone.io.SpineImportPolicy.Approval approval) throws Exception {
+            target.openResolved(path, approval);
+        }
+        default boolean supportsPreview() { return true; }
+        default boolean supportsViewControl() { return true; }
+        default String previewDescription() { return io.github.samlinb.openbone.i18n.M.m("mcp.desktopPreviewDescription"); }
+        default String previewSource() { return "OpenBone live GL viewport"; }
         CommandHistory history();
         Map<String, Object> context();
         void prepare();
@@ -31,7 +41,7 @@ public final class EditorMcpTools implements AutoCloseable {
         public CaptureOptions(boolean fit,Boolean showBones,Boolean showGrid,boolean fitAnimation){this(fit,showBones,showGrid,fitAnimation,null);}
         public CaptureOptions(boolean fit,Boolean showBones,Boolean showGrid){this(fit,showBones,showGrid,false);}
     }
-    public record ViewControl(String action, EntityId animation, Double time, Boolean loop, Boolean showBones, Boolean showGrid) {}
+    public record ViewControl(String action, EntityId animation, Double time, Boolean loop, Boolean showBones, Boolean showGrid, List<EntityId> animationIds) {}
     public record Preview(BufferedImage image, Map<String, Object> metadata) {}
     private record Receipt(JsonNode arguments, ObjectNode result) {}
     private static final ObjectMapper JSON = mapper();
@@ -60,15 +70,15 @@ public final class EditorMcpTools implements AutoCloseable {
              "offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":200}}
             """, "kind"), true);
         add(tools, "openbone_apply_edits", AnimationMcpEdits.message("description"), editSchema(), false);
-        add(tools, "openbone_capture_preview", "Seek exact seconds, pause and capture the real GL viewport as PNG, max 1024 pixels per side. Optional fit frames visible geometry; showBones/showGrid can hide editing overlays. Options persist in the editor. Requires a visible window. Capture multiple times to inspect motion; no undo history.", schema("""
+        add(tools, "openbone_capture_preview", host.previewDescription(), schema("""
             {"animationId":{"type":"string"},"time":{"type":"number","minimum":0,"maximum":600},"expectedRevision":{"type":"string"},"fit":{"type":"boolean"},"showBones":{"type":"boolean"},"showGrid":{"type":"boolean"}}
             """, "animationId", "time", "expectedRevision"), false);
         for (String action : List.of("undo", "redo"))
             add(tools, "openbone_" + action, "Perform one " + action + " in the current editor history (including manual edits). Read context first; retry with the same requestId and arguments.", schema("""
                 {"expectedRevision":{"type":"string"},"requestId":{"type":"string","minLength":1,"maxLength":128}}
                 """, "expectedRevision", "requestId"), false);
-        add(tools,"openbone_control_view","Control live playback and camera without editing model/history. action seek requires time; play/seek use animationId or the current animation. frame fits current visible geometry (bones if empty). Configure overlay flags and looping. Uses revision and retry receipt like editing.",schema("""
-            {"action":{"enum":["play","pause","seek","frame","configure"]},"animationId":{"type":"string"},"time":{"type":"number","minimum":0,"maximum":600},"loop":{"type":"boolean"},"showBones":{"type":"boolean"},"showGrid":{"type":"boolean"},"expectedRevision":{"type":"string"},"requestId":{"type":"string"}}
+        add(tools,"openbone_control_view","Control live playback and camera without editing model/history. action seek requires time; play/seek use animationId or the current animation. frame fits current visible geometry (bones if empty). Use action sequence with animationIds (ordered, duplicates allowed, 1-128 IDs) to preview consecutive actions without blending; zero-duration actions are skipped and loop repeats the whole sequence. play/pause resume/pause the current sequence; play with explicit animationId or seek exits sequence mode. Configure overlay flags and looping. Uses revision and retry receipt like editing.",schema("""
+            {"action":{"enum":["play","pause","seek","frame","configure","sequence"]},"animationId":{"type":"string"},"animationIds":{"type":"array","minItems":1,"maxItems":128,"items":{"type":"string"}},"time":{"type":"number","minimum":0,"maximum":600},"loop":{"type":"boolean"},"showBones":{"type":"boolean"},"showGrid":{"type":"boolean"},"expectedRevision":{"type":"string"},"requestId":{"type":"string"}}
             ""","action","expectedRevision","requestId"),false);
         add(tools,"openbone_save_project","Save a captured current project to an absolute .json path, portable by default (copies PNGs via the existing save service). Existing target requires overwrite:true. Preserves live undo history. If manual edits occur during IO, savedRevision identifies the disk snapshot and adopted:false leaves current state dirty. Retry with identical requestId and arguments.",schema("""
             {"path":{"type":"string"},"portable":{"type":"boolean"},"overwrite":{"type":"boolean"},"expectedRevision":{"type":"string"},"requestId":{"type":"string"}}
@@ -88,7 +98,19 @@ public final class EditorMcpTools implements AutoCloseable {
         add(tools,"openbone_cancel_render",io.github.samlinb.openbone.i18n.M.m("media.cancelDescription"),schema("""
             {"jobId":{"type":"string"}}
             ""","jobId"),false);
+        for (int i = tools.size() - 1; i >= 0; i--) if (!available(tools.get(i).path("name").asText())) tools.remove(i);
+        String access = host.accessDescription();
+        if (!access.isEmpty()) for (JsonNode tool : tools)
+            ((ObjectNode) tool).put("description", tool.path("description").asText() + " " + access);
         return tools;
+    }
+
+    private boolean available(String name) {
+        return switch (name) {
+            case "openbone_capture_preview", "openbone_render_animation", "openbone_render_status", "openbone_cancel_render" -> host.supportsPreview();
+            case "openbone_control_view" -> host.supportsViewControl();
+            default -> true;
+        };
     }
 
     private static ObjectNode editSchema() {
@@ -133,6 +155,8 @@ public final class EditorMcpTools implements AutoCloseable {
     public synchronized ObjectNode call(String name, JsonNode args) {
         if (SwingUtilities.isEventDispatchThread()) throw new IllegalStateException("MCP calls must run off EDT");
         try {
+            host.validateArguments(name, args);
+            if (!available(name)) throw new UnsupportedOperationException(io.github.samlinb.openbone.i18n.M.m("headless.unavailable"));
             if(media.busy()&&!Set.of("openbone_get_context","openbone_query_scene","openbone_render_status","openbone_cancel_render","openbone_render_animation").contains(name))
                 throw new IllegalStateException(io.github.samlinb.openbone.i18n.M.m("media.busy"));
             ObjectNode result;
@@ -179,7 +203,7 @@ public final class EditorMcpTools implements AutoCloseable {
         data.put("revision", h.revision());
         data.put("version",io.github.samlinb.openbone.EditorApplication.version());
         data.put("mcpApiVersion",2);
-        data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",true,"cleanPreview",true,"atomicEdits",true,"nonBoneKeyframeQuery",true,"nonBoneKeyframeEdits",true,"animationMedia",true));
+        data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",host.supportsViewControl(),"cleanPreview",host.supportsPreview(),"atomicEdits",true,"nonBoneKeyframeQuery",true,"nonBoneKeyframeEdits",true,"animationMedia",host.supportsPreview()));
         data.put("spineIO",Map.of("versions",io.github.samlinb.openbone.io.SpineVersion.exportVersions(),"formats",List.of("JSON","BINARY","NATIVE"),"nativeCliConfigured",io.github.samlinb.openbone.io.SpineCliBridge.configured()));
         data.put("dirty", h.isDirty());
         data.put("activeSkin", d.resources().activeSkin());
@@ -414,6 +438,7 @@ public final class EditorMcpTools implements AutoCloseable {
         double fitTime=a.has("fitTime")?number(a.get("fitTime"),"fitTime",0,duration):duration*.5;
         var request=new AnimationMediaService.Request(text(a,"requestId",128),revision,animation,directory,fps,duration,fit,fitTime);
         var source=new AnimationMediaService.Source(){
+            public String description(){return host.previewSource();}
             public String fitStrategy(){return "Fixed camera framed once with 70% viewport occupancy: complete encoded-frame times for up to 256 frames, otherwise 256 uniform samples plus bounded source-key extrema and attachment transitions; CPU bounds evaluated off EDT";}
             public void checkRevision(String expected)throws Exception{
                 onEdt(()->{host.prepare();EditorMcpTools.this.checkRevision(expected);return null;});
@@ -449,7 +474,7 @@ public final class EditorMcpTools implements AutoCloseable {
 
     private ObjectNode serviceOperation(String name,JsonNode a) throws Exception {
         switch(name) {
-            case "openbone_control_view" -> fields(a,"action","animationId","time","loop","showBones","showGrid","expectedRevision","requestId");
+            case "openbone_control_view" -> fields(a,"action","animationId","animationIds","time","loop","showBones","showGrid","expectedRevision","requestId");
             case "openbone_save_project" -> fields(a,"path","portable","overwrite","expectedRevision","requestId");
             case "openbone_load_project" -> fields(a,"path","dirtyPolicy","expectedRevision","requestId","versionRiskApproval");
             case "openbone_export_spine" -> fields(a,"directory","version","format","expectedRevision","requestId");
@@ -469,10 +494,30 @@ public final class EditorMcpTools implements AutoCloseable {
             result=success(Map.of("path",exported.toString(),"directory",directory.toString(),"sourceRevision",revision,"version",version,"format",format.name()));
         }else if(name.equals("openbone_control_view")) {
             String action=text(a,"action",32);
-            if(!Set.of("play","pause","seek","frame","configure").contains(action))throw new IllegalArgumentException("Invalid view action");
+            if(!Set.of("play","pause","seek","frame","configure","sequence").contains(action))throw new IllegalArgumentException("Invalid view action");
             if(action.equals("seek")&&!a.has("time"))throw new IllegalArgumentException("seek requires time");
-            var control=new ViewControl(action,a.has("animationId")?id(a,"animationId"):null,a.has("time")?number(a.get("time"),"time",0,600):null,optionalBool(a,"loop"),optionalBool(a,"showBones"),optionalBool(a,"showGrid"));
-            result=onEdt(()->{host.prepare();checkRevision(revision);host.control(control);return success(context());});
+            List<EntityId> animationIds = null;
+            if (action.equals("sequence")) {
+                if (a.has("animationId") || a.has("time")) throw new IllegalArgumentException(io.github.samlinb.openbone.i18n.M.m("sequence.fields"));
+                var ids = a.get("animationIds");
+                if (ids == null || !ids.isArray() || ids.isEmpty() || ids.size() > 128)
+                    throw new IllegalArgumentException(io.github.samlinb.openbone.i18n.M.m("sequence.requiresIds"));
+                var parsed = new ArrayList<EntityId>();
+                for (var value : ids) {
+                    if (!value.isTextual()) throw new IllegalArgumentException(io.github.samlinb.openbone.i18n.M.m("sequence.idStrings"));
+                    parsed.add(new EntityId(value.textValue()));
+                }
+                animationIds = List.copyOf(parsed);
+            } else if (a.has("animationIds")) throw new IllegalArgumentException(io.github.samlinb.openbone.i18n.M.m("sequence.idsAction"));
+            var control=new ViewControl(action,a.has("animationId")?id(a,"animationId"):null,a.has("time")?number(a.get("time"),"time",0,600):null,optionalBool(a,"loop"),optionalBool(a,"showBones"),optionalBool(a,"showGrid"),animationIds);
+            result=onEdt(()->{
+                // Reject invalid/stale playlists before prepare pauses the current preview.
+                if (control.animationIds() != null) {
+                    checkRevision(revision);
+                    new AnimationSequence(host.history().state().model(), control.animationIds());
+                }
+                host.prepare();checkRevision(revision);
+                host.control(control);return success(context());});
         } else {
             Path path=SceneMcpEdits.absolutePath(a,"path");
             boolean loading=name.equals("openbone_load_project");
@@ -494,7 +539,7 @@ public final class EditorMcpTools implements AutoCloseable {
                     io.github.samlinb.openbone.io.SpineImportPolicy.Parser.valueOf(parser);
                     approval=new io.github.samlinb.openbone.io.SpineImportPolicy.Approval(hash,parser);
                 }
-                prepared.openResolved(path,approval);
+                host.loadProject(prepared,path,approval);
                 result=onEdt(()->{host.prepare();checkRevision(revision);host.installProject(prepared);
                     var loaded=new LinkedHashMap<>(context());loaded.put("importWarnings",prepared.importWarnings());return success(loaded);});
             } else {

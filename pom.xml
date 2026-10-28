@@ -80,6 +80,27 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
         <version>3.4.2</version>
+        <executions>
+          <execution>
+            <id>runtime-core</id><phase>package</phase><goals><goal>jar</goal></goals>
+            <configuration>
+              <classifier>runtime-core</classifier>
+              <includes>
+                <include>io/github/samlinb/openbone/core/**</include>
+                <include>io/github/samlinb/openbone/io/**</include>
+                <include>io/github/samlinb/openbone/application/**</include>
+                <include>io/github/samlinb/openbone/i18n/**</include>
+                <include>io/github/samlinb/openbone/viewport/ImageAssets*</include>
+                <include>io/github/samlinb/openbone/viewport/VisibleGeometry*</include>
+                <include>io/github/samlinb/openbone/viewport/TexturedScene*</include>
+                <include>io/github/samlinb/openbone/viewport/AnimationFraming*</include>
+                <include>io/github/samlinb/openbone/viewport/Camera2D*</include>
+                <include>i18n/**</include>
+              </includes>
+              <archive combine.self="override"/>
+            </configuration>
+          </execution>
+        </executions>
         <configuration>
           <archive><manifest><mainClass>io.github.samlinb.openbone.EditorApplication</mainClass></manifest></archive>
         </configuration>

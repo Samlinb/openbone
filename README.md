@@ -1,5 +1,9 @@
 # OpenBone
 
+For MCP-only editing without an editor window and a separate exported-asset preview application, see [headless editing and runtime preview](docs/HEADLESS_RUNTIME.md).
+
+For multiple users with independent projects on one headless MCP server, see [project isolation and deployment](docs/PROJECT_ISOLATION.md).
+
 MCP is a core project capability. Version 0.1.3 (MCP API v2) lets a local AI build bones, slots and PNG attachments in the live editor, animate Bezier keyframes, capture clean GL previews, control playback, save/load projects, and undo/redo atomic batches. Use the **MCP** menu to start the service and view connection details. See the [MCP API v2 guide](docs/MCP_V2.md).
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md)
@@ -50,6 +54,10 @@ Openbone uses its own editable project format and supports importing and exporti
 | Export | The skeleton must have exactly one root bone; project data must also pass runtime float32 range checks |
 
 When integrating into a game, use a runtime that matches the target format and verify actual playback in the target engine. Openbone's project JSON, the asset-pack entry `current.json`, and the Spine skeleton JSON serve different purposes.
+
+## Browser runtime
+
+The [OpenBone Web Runtime](web-runtime/README.md) plays exported data without a JVM or editor connection. Its official Spine WebGL integration supplies native 4.2/4.3 playback under the upstream license; the independent implementation includes the Java baseline's constraints, clipping, inheritance, skin activation and five-family JSON/binary adapters. See the source-backed [capability matrix](web-runtime/CAPABILITIES.md), embedding APIs and actual Java/browser verification commands.
 
 ## Download and Run
 
@@ -127,7 +135,7 @@ Organizing the whole character under a single root bone is recommended to satisf
 2. Select a bone, move the time to `0` seconds, and use "Record TRS" to capture the initial pose.
 3. Move the time to another position, adjust the bone pose, and record keyframes again.
 4. Select keyframes on the timeline and use "Curve…" to set linear, stepped or Bézier interpolation; hold `Ctrl` to multi-select keyframes.
-5. Click "Play" and enable "Loop" as needed. Manage related assets and discrete keyframes via "Skins / Attachments / Events / Order…".
+5. Click "Play" and enable "Loop" as needed. For consecutive actions, open **Sequence…**, arrange the playlist, and choose **Play sequence**; **Loop sequence** repeats the whole group. See [consecutive animation preview](docs/ANIMATION_SEQUENCE.md). Manage related assets and discrete keyframes via "Skins / Attachments / Events / Order…".
 
 Setup edits the base structure and initial pose; Animate is for animation. After adjusting bones, explicitly record the keyframes you need.
 

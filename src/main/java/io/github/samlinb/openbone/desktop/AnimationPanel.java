@@ -40,6 +40,12 @@ final class AnimationPanel extends JPanel {
 
     private final Host host;
     private final Playback clock = new Playback();
+    private final Playback sequenceClock = new Playback();
+    private AnimationSequence sequence;
+    private List<EntityId> sequenceIds = List.of();
+    private double sequenceEventCursor;
+    private final JCheckBox sequenceEnabled = new JCheckBox(m("sequence.enabled"));
+    private final JLabel sequenceStatus = new JLabel();
     private final LongSupplier nanoTime;
 
     private record ClipChoice(EntityId id, String name) {
@@ -133,7 +139,7 @@ final class AnimationPanel extends JPanel {
         addButton(top, m("workspace.resources"), "animation.resources", () -> {
             if (!prepare())
                 return;
-            clock.seek(clock.time());
+            pausePlayback();
             new ResourceDialog(this, host.history(), this::active, clock.time(), host::resourcesChanged, host::error,host::imageBase)
                     .setVisible(true);
         });
@@ -150,6 +156,7 @@ final class AnimationPanel extends JPanel {
             var choice = (ClipChoice) clips.getSelectedItem();
             if (choice == null)
                 return;
+            leaveSequence();
             clock.seek(0);
             active = choice.id();
             host.history().selectKeys(Set.of());
@@ -158,14 +165,17 @@ final class AnimationPanel extends JPanel {
         }));
         var tools = new JPanel(new GridLayout(2, 1));
         var transport = new JPanel(new WorkspaceFlowLayout(FlowLayout.LEFT, 5, 2));
-        addButton(transport, m("animationpanel.0012"), "animation.start", () -> seek(0));
+        addButton(transport, m("animationpanel.0012"), "animation.start", () -> {
+            if (sequence == null) seek(0);
+            else if (prepare()) { configureSequence(sequenceIds); host.changed(); }
+        });
         transport.add(play);
         play.setName("animation.play");
         register(play);
         play.addActionListener(e -> guard(() -> {
             if (!prepare())
                 return;
-            if (clock.playing()) {
+            if (playing()) {
                 pausePlayback();
             } else {
                 startPlayback();
@@ -180,6 +190,19 @@ final class AnimationPanel extends JPanel {
             setLooping(loop.isSelected());
             host.changed();
         });
+        register(sequenceEnabled, "animation.sequenceEnabled");
+        transport.add(sequenceEnabled);
+        sequenceEnabled.addActionListener(e -> guard(() -> {
+            boolean enabled = sequenceEnabled.isSelected();
+            sequenceEnabled.setSelected(sequence != null);
+            if (!prepare()) return;
+            if (enabled) configureSequence(sequenceIds.isEmpty()
+                    ? model().animations().stream().map(AnimationClip::id).toList() : sequenceIds);
+            else leaveSequence();
+            host.changed();
+        }));
+        addButton(transport, m("sequence.edit"), "animation.sequence", this::sequenceDialog);
+        transport.add(sequenceStatus);
         transport.add(new JLabel(m("animationpanel.0013")));
         register(time, "animation.time");
         transport.add(time);
@@ -238,18 +261,17 @@ final class AnimationPanel extends JPanel {
                 return;
             }
             cancel();
-            clock.pause(nanoTime.getAsLong(), duration());
+            pausePlayback();
             animate = next;
             body.setVisible(animate);
             revalidate();
             host.changed();
         }));
         timer = new javax.swing.Timer(16, e -> {
-            if (!clock.playing())
+            if (!playing())
                 return;
             guard(() -> {
-                clock.tick(nanoTime.getAsLong(), duration());
-                emitEvents(false);
+                tickPlayback(nanoTime.getAsLong());
                 refresh();
                 host.poseChanged();
             });
@@ -355,7 +377,7 @@ final class AnimationPanel extends JPanel {
 
     EntityId active() {
         if (model().animations().isEmpty()) {
-            if (!active.equals(AnimationClip.DEFAULT_ID) || clock.playing())
+            if (!active.equals(AnimationClip.DEFAULT_ID) || playing())
                 clock.seek(0);
             active = AnimationClip.DEFAULT_ID;
         } else if (model().animations().stream().noneMatch(a -> a.id().equals(active))) {
@@ -442,7 +464,7 @@ final class AnimationPanel extends JPanel {
     }
 
     boolean playing() {
-        return clock.playing();
+        return sequence != null ? sequenceClock.playing() : clock.playing();
     }
 
     double time() {
@@ -453,6 +475,7 @@ final class AnimationPanel extends JPanel {
     void remoteSeek(EntityId clip, double seconds) {
         model().animation(clip);
         PhysicsPlayer.validateTime(model(), clip, seconds);
+        leaveSequence();
         active = clip;
         animate = true;
         observedModel = model();
@@ -464,7 +487,7 @@ final class AnimationPanel extends JPanel {
     void remoteControl(String action,EntityId clip,Double seconds,Boolean looping) {
         if(clip!=null)model().animation(clip);
         EntityId target=clip==null?active():clip;
-        if(seconds!=null||action.equals("play")||action.equals("seek"))
+        if(seconds!=null||action.equals("seek")||action.equals("play") && (clip!=null || sequence==null))
             remoteSeek(target,seconds==null?clock.time():seconds);
         if(looping!=null) setLooping(looping);
         if(action.equals("play"))startPlayback();
@@ -473,6 +496,14 @@ final class AnimationPanel extends JPanel {
     }
 
     private void startPlayback() {
+        if (sequence != null) {
+            boolean restart = sequenceClock.time() >= sequence.duration();
+            sequenceClock.play(nanoTime.getAsLong(), sequence.duration());
+            sequenceEventCursor = sequenceClock.absoluteTime();
+            if (restart) clearEvents();
+            updateSequence(sequenceClock.time() == 0 && !zeroEmitted);
+            return;
+        }
         if (clock.time() >= duration())
             zeroEmitted = false;
         clock.play(nanoTime.getAsLong(), duration());
@@ -484,13 +515,151 @@ final class AnimationPanel extends JPanel {
     }
 
     private void pausePlayback() {
-        clock.pause(nanoTime.getAsLong(), duration());
-        emitEvents(false);
+        long now = nanoTime.getAsLong();
+        if (sequence != null) {
+            sequenceClock.pause(now, sequence.duration());
+            updateSequence(false);
+        } else {
+            clock.pause(now, duration());
+            emitEvents(false);
+        }
+    }
+
+    private void tickPlayback(long now) {
+        if (sequence != null) {
+            sequenceClock.tick(now, sequence.duration());
+            updateSequence(false);
+        } else {
+            clock.tick(now, duration());
+            emitEvents(false);
+        }
+    }
+
+    private void updateSequence(boolean includeStart) {
+        appendEvents(sequence.events(model(), sequenceEventCursor, sequenceClock.absoluteTime(),
+                sequenceClock.loop(), includeStart));
+        sequenceEventCursor = sequenceClock.absoluteTime();
+        if (includeStart || sequenceClock.absoluteTime() > 0) zeroEmitted = true;
+        var position = sequence.position(sequenceClock.time());
+        if (!active.equals(position.animation())) host.history().selectKeys(Set.of());
+        active = position.animation();
+        clock.seek(position.time());
+        eventCursor = clock.absoluteTime();
+    }
+
+    void configureSequence(List<EntityId> ids) {
+        var candidate = new AnimationSequence(model(), ids); // Validate everything before changing playback.
+        sequenceIds = candidate.ids();
+        sequence = candidate;
+        sequenceEnabled.setSelected(true);
+        sequenceClock.seek(0);
+        sequenceClock.loop(loop.isSelected());
+        sequenceEventCursor = 0;
+        var first = sequence.position(0);
+        active = first.animation();
+        clock.seek(0);
+        clock.loop(false);
+        animate = true;
+        host.history().selectKeys(Set.of());
+        clearEvents();
+        observedModel = model();
+    }
+
+    void remoteSequence(List<EntityId> ids, Boolean looping) {
+        configureSequence(ids);
+        if (looping != null) setLooping(looping);
+        startPlayback();
+        host.changed();
+    }
+
+    private void leaveSequence() {
+        sequenceClock.seek(0);
+        sequence = null;
+        sequenceEnabled.setSelected(false);
+        clock.loop(loop.isSelected());
+    }
+
+    Map<String, Object> sequenceState() {
+        return Map.of("enabled", sequence != null, "animationIds", sequenceIds.stream().map(EntityId::value).toList(),
+                "index", sequence == null ? -1 : sequence.position(sequenceClock.time()).index(),
+                "time", sequenceClock.time(), "loop", loop.isSelected());
+    }
+
+    private void sequenceDialog() {
+        if (!prepare()) return;
+        pausePlayback();
+        var queue = new DefaultListModel<ClipChoice>();
+        var available = new JComboBox<ClipChoice>();
+        available.setName("sequence.available");
+        for (var clip : model().animations()) available.addItem(new ClipChoice(clip.id(), clip.name()));
+        var initial = sequenceIds.isEmpty() ? model().animations().stream().map(AnimationClip::id).toList() : sequenceIds;
+        for (var id : initial)
+            if (model().animations().stream().anyMatch(a -> a.id().equals(id)))
+                queue.addElement(new ClipChoice(id, model().animation(id).name()));
+        var list = new JList<>(queue);
+        list.setName("sequence.queue");
+        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        var content = new JPanel(new BorderLayout(6, 6));
+        var addRow = new JPanel(new BorderLayout(6, 0));
+        addRow.add(available);
+        var add = new JButton(m("sequence.add"));
+        add.setName("sequence.add");
+        add.addActionListener(e -> {
+            if (available.getSelectedItem() != null && queue.size() < 128) {
+                queue.addElement((ClipChoice) available.getSelectedItem());
+                list.setSelectedIndex(queue.size() - 1);
+            }
+        });
+        addRow.add(add, BorderLayout.EAST);
+        content.add(addRow, BorderLayout.NORTH);
+        var scroll = new JScrollPane(list);
+        scroll.setPreferredSize(WorkspaceTheme.size(420, 250));
+        content.add(scroll);
+        var buttons = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        for (int direction : new int[] {-1, 1, 0}) {
+            var button = new JButton(m(direction < 0 ? "sequence.up" : direction > 0 ? "sequence.down" : "sequence.remove"));
+            button.setName(direction < 0 ? "sequence.up" : direction > 0 ? "sequence.down" : "sequence.remove");
+            button.addActionListener(e -> {
+                int index = list.getSelectedIndex(), next = index + direction;
+                if (index < 0) return;
+                if (direction == 0) {
+                    queue.remove(index);
+                    if (!queue.isEmpty()) list.setSelectedIndex(Math.min(index, queue.size() - 1));
+                } else if (next >= 0 && next < queue.size()) {
+                    var choice = queue.remove(index);
+                    queue.add(next, choice);
+                    list.setSelectedIndex(next);
+                }
+            });
+            buttons.add(button);
+        }
+        var footer = new JPanel(new BorderLayout());
+        footer.add(buttons, BorderLayout.NORTH);
+        footer.add(new JLabel(m("sequence.hint")), BorderLayout.SOUTH);
+        content.add(footer, BorderLayout.SOUTH);
+        host.changed();
+        if (JOptionPane.showOptionDialog(this, content, m("sequence.title"), JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.PLAIN_MESSAGE, null, new String[] {m("sequence.play"), m("sequence.cancel")},
+                m("sequence.play")) == 0) {
+            configureSequence(Collections.list(queue.elements()).stream().map(ClipChoice::id).toList());
+            startPlayback();
+        }
+        host.changed();
     }
 
     private void setLooping(boolean value) {
+        if (sequence != null) {
+            boolean resume = playing();
+            pausePlayback();
+            sequenceClock.loop(value);
+            loop.setSelected(value);
+            if (resume) {
+                startPlayback();
+            }
+            return;
+        }
         if (clock.loop() != value) {
-            boolean resume = clock.playing();
+            boolean resume = playing();
             if (resume)
                 pausePlayback();
             clock.loop(value);
@@ -525,8 +694,8 @@ final class AnimationPanel extends JPanel {
     boolean editing() {
         if (!host.commitFields())
             return false;
-        if (clock.playing()) {
-            clock.pause(nanoTime.getAsLong(), duration());
+        if (playing()) {
+            pausePlayback();
             host.changed();
         }
         return true;
@@ -537,6 +706,7 @@ final class AnimationPanel extends JPanel {
         if (!prepare())
             return;
         cancel();
+        leaveSequence();
         clock.seek(snap ? Playback.snap(value, fps) : value);
         eventCursor = clock.absoluteTime();
         zeroEmitted = false;
@@ -561,6 +731,8 @@ final class AnimationPanel extends JPanel {
     }
 
     void reset() {
+        leaveSequence();
+        sequenceIds = List.of();
         cancel();
         clock.seek(0);
         clearEvents();
@@ -570,6 +742,7 @@ final class AnimationPanel extends JPanel {
     }
 
     void stop() {
+        if (playing()) pausePlayback();
         timer.stop();
         cancel();
     }
@@ -577,6 +750,11 @@ final class AnimationPanel extends JPanel {
     void refresh() {
         refreshing = true;
         try {
+            if (observedModel != null && !observedModel.equals(model())) {
+                leaveSequence();
+                sequenceIds = sequenceIds.stream().filter(id -> model().animations().stream()
+                        .anyMatch(a -> a.id().equals(id))).toList();
+            }
             active();
             if (observedModel != null && !observedModel.equals(model())) {
                 clock.seek(Math.min(clock.time(), duration()));
@@ -598,7 +776,11 @@ final class AnimationPanel extends JPanel {
             body.setVisible(animate);
             if (!time.isFocusOwner())
                 time.setText(Double.toString(clock.time()));
-            play.setText(clock.playing() ? m("animationpanel.0022") : m("animationpanel.0002"));
+            sequenceEnabled.setSelected(sequence != null);
+            loop.setText(m(sequence != null ? "sequence.loop" : "animationpanel.0003"));
+            sequenceStatus.setText(sequence == null ? "" : m("sequence.position",
+                    sequence.position(sequenceClock.time()).index() + 1, sequenceIds.size()));
+            play.setText(playing() ? m("animationpanel.0022") : m("animationpanel.0002"));
             frame.setText(String.format(Locale.ROOT, m("animationpanel.0023"), clock.time() * fps, duration()));
             tracks.setPreferredSize(new Dimension(WorkspaceTheme.scale(600), Math.max(90, rows().size() * TrackView.ROW)));
             tracks.revalidate();
@@ -629,6 +811,10 @@ final class AnimationPanel extends JPanel {
         var fired = EventSampler.between(model().animation(active()), eventCursor, clock.absoluteTime(), clock.loop(),
                 includeStart);
         eventCursor = clock.absoluteTime();
+        appendEvents(fired);
+    }
+
+    private void appendEvents(List<EventSampler.Fired> fired) {
         firedCount += fired.size();
         recentEvents.addAll(fired);
         while (recentEvents.size() > 100)
@@ -642,6 +828,7 @@ final class AnimationPanel extends JPanel {
             return;
         clock.seek(0);
         clearEvents();
+        leaveSequence();
         EntityId current = active();
         if (operation.equals("delete")) {
             if (model().animations().isEmpty())
@@ -684,7 +871,7 @@ final class AnimationPanel extends JPanel {
         var bone = host.selectedBone();
         if (bone == null)
             throw new IllegalArgumentException(m("animationpanel.0033"));
-        clock.pause(nanoTime.getAsLong(), duration());
+        pausePlayback();
         var t = display().bone(bone.id()).local();
         mutate(m("animationpanel.0034"), d -> AnimationEdits.record(d, active(), bone.id(), clock.time(), t, channels));
     }
@@ -702,7 +889,7 @@ final class AnimationPanel extends JPanel {
             throw new IllegalArgumentException(m("animationpanel.0032"));
         if (!prepare())
             return;
-        clock.pause(nanoTime.getAsLong(), duration());
+        pausePlayback();
         host.history().execute(name, Commands.model(d -> operation.apply(withActiveDefault(d))));
         host.changed();
     }
@@ -712,7 +899,7 @@ final class AnimationPanel extends JPanel {
             throw new IllegalArgumentException(m("animationpanel.0032"));
         if (!prepare())
             return;
-        clock.pause(nanoTime.getAsLong(), duration());
+        pausePlayback();
         host.history().execute(m("animationpanel.0035"), state -> {
             var d = state.model();
             Set<EntityId> old = new HashSet<>();
@@ -752,8 +939,9 @@ final class AnimationPanel extends JPanel {
         var out = new LinkedHashMap<String, Object>();
         out.put("mode", animate ? "ANIMATE" : "SETUP");
         out.put("time", clock.time());
-        out.put("playing", clock.playing());
-        out.put("loop", clock.loop());
+        out.put("playing", playing());
+        out.put("loop", loop.isSelected());
+        out.put("sequence", sequenceState());
         out.put("fps", fps);
         out.put("snap", snap);
         out.put("duration", duration());

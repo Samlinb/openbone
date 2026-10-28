@@ -36,6 +36,12 @@ class EditorMcpServerTest {
         CommandHistory history = project.history();
         int refreshes;
         Runnable prepareHook;
+        final List<EditorMcpTools.ViewControl> viewControls = new ArrayList<>();
+
+        public void control(EditorMcpTools.ViewControl control) {
+            edt();
+            viewControls.add(control);
+        }
 
         void edt() {
             assertTrue(SwingUtilities.isEventDispatchThread());
@@ -135,6 +141,32 @@ class EditorMcpServerTest {
 
     String revision() throws Exception {
         return ok("openbone_get_context", Map.of()).path("revision").asText();
+    }
+
+    @Test void sequenceProtocolValidatesBeforeDispatchAndRetriesWithoutRestarting() throws Exception {
+        edt(() -> {
+            host.project = new ProjectDocument(io.github.samlinb.openbone.core.P8ModelTest.sample());
+            host.history = host.project.history();
+            return null;
+        });
+        String revision = revision();
+        String clip = io.github.samlinb.openbone.TestData.id(30).value();
+        var args = new LinkedHashMap<String, Object>(Map.of("action", "sequence", "animationIds", List.of(clip, clip),
+                "loop", true, "expectedRevision", revision, "requestId", "sequence"));
+        var started = ok("openbone_control_view", args);
+        assertEquals(started, ok("openbone_control_view", args));
+        assertEquals(1, host.viewControls.size());
+        assertEquals(List.of(new EntityId(clip), new EntityId(clip)), host.viewControls.get(0).animationIds());
+        for (var invalid : List.of(List.of(), List.of("unknown"), List.of(clip, BONE.value()), Collections.nCopies(129, clip))) {
+            args.put("animationIds", invalid); args.put("requestId", UUID.randomUUID().toString());
+            assertTrue(call("openbone_control_view", args).path("isError").asBoolean());
+            assertEquals(1, host.viewControls.size());
+        }
+        args.put("animationIds", List.of(clip)); args.put("expectedRevision", "stale");
+        assertTrue(call("openbone_control_view", args).path("isError").asBoolean());
+        assertEquals(1, host.viewControls.size());
+        assertEquals(revision, revision());
+        assertEquals(0, edt(() -> host.history.undoCount()));
     }
 
     @Test void versionedSpineExportUsesSnapshotAndIdempotentPublication()throws Exception {

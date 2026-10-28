@@ -1,0 +1,29 @@
+name: Web runtime
+
+on:
+  push:
+    paths: ['web-runtime/**', 'src/main/java/**', 'src/test/java/io/github/samlinb/openbone/io/WebRuntimeFixtureTest.java', 'pom.xml', '.github/workflows/web-runtime.yml']
+  pull_request:
+    paths: ['web-runtime/**', 'src/main/java/**', 'src/test/java/io/github/samlinb/openbone/io/WebRuntimeFixtureTest.java', 'pom.xml', '.github/workflows/web-runtime.yml']
+  workflow_dispatch:
+
+jobs:
+  parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: mvn -B -Dtest=WebRuntimeFixtureTest,WebRuntimeCapabilitiesTest -Dopenbone.webRuntime=true test
+      - run: npm --prefix web-runtime/official ci --ignore-scripts --no-audit --no-fund
+      - run: npm --prefix web-runtime/official run build
+      - run: npm --prefix web-runtime test
+        env:
+          OPENBONE_WEB_FIXTURE: ${{ github.workspace }}/target/web-runtime-fixture
+          OPENBONE_WEB_CAPABILITIES: ${{ github.workspace }}/target/web-runtime-capabilities

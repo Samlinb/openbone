@@ -712,7 +712,7 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                 return Map.of("projectPath", document.path().map(Path::toString).orElse(""),
                         "animationId", model().animations().isEmpty() ? "" : animation.active().value(),
                         "time", animation.time(), "mode", animation.animate() ? "animate" : "setup", "playing", animation.playing(),
-                        "showBones",viewport.showBones(),"showGrid",viewport.showGrid());
+                        "showBones",viewport.showBones(),"showGrid",viewport.showGrid(), "sequence", animation.sequenceState());
             }
             public void prepare() {
                 if (closing || !isShowing()) throw new IllegalStateException("Editor is closed or hidden.");
@@ -730,7 +730,8 @@ public final class EditorFrame extends JFrame implements EditorViewport.Host {
                 // Validate requested animation/time before changing view options.
                 if(control.animation()!=null)model().animation(control.animation());
                 if(control.time()!=null)PhysicsPlayer.validateTime(model(),control.animation()==null?animation.active():control.animation(),control.time());
-                animation.remoteControl(control.action(),control.animation(),control.time(),control.loop());
+                if (control.animationIds() != null) animation.remoteSequence(control.animationIds(), control.loop());
+                else animation.remoteControl(control.action(),control.animation(),control.time(),control.loop());
                 viewport.displayOptions(control.showBones(),control.showGrid());
                 validate();
                 if(control.action().equals("frame"))frameCurrentPose();
