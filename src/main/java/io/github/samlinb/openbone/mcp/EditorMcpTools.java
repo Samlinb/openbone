@@ -63,13 +63,13 @@ public final class EditorMcpTools implements AutoCloseable {
         ArrayNode tools = JSON.createArrayNode();
         add(tools, "openbone_get_context", "Read the current live project summary, selection, view and revision. Query scene for IDs and keyframes.", schema("{}"), true);
         add(tools, "openbone_query_scene", AnimationMcpQueries.message("description"), schema("""
-            {"kind":{"enum":["bones","animations","keyframes","slots","attachments","constraints","skins"]},
+            {"kind":{"enum":["bones","animations","keyframes","slots","attachments","constraints","skins","events"]},
              "animationId":{"type":"string"},"boneId":{"type":"string"},"expectedRevision":{"type":"string"},
              "trackType":{"enum":["bone","non_bone","all","deform","constraint","slot_color","attachment","draw_order","event"]},
              "targetId":{"type":"string"},"channel":{"type":"string","minLength":1,"maxLength":64},
              "offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":200}}
             """, "kind"), true);
-        add(tools, "openbone_apply_edits", AnimationMcpEdits.message("description"), editSchema(), false);
+        add(tools, "openbone_apply_edits", AnimationMcpEdits.message("description") + " " + EventMcpEdits.message("description"), editSchema(), false);
         add(tools, "openbone_capture_preview", host.previewDescription(), schema("""
             {"animationId":{"type":"string"},"time":{"type":"number","minimum":0,"maximum":600},"expectedRevision":{"type":"string"},"fit":{"type":"boolean"},"showBones":{"type":"boolean"},"showGrid":{"type":"boolean"}}
             """, "animationId", "time", "expectedRevision"), false);
@@ -126,6 +126,7 @@ public final class EditorMcpTools implements AutoCloseable {
         var variants=(ArrayNode)s.path("properties").path("edits").path("items").path("oneOf");
         variants.addAll(SceneMcpEdits.schemas(JSON));
         variants.addAll(AnimationMcpEdits.schemas(JSON));
+        variants.addAll(EventMcpEdits.schemas(JSON));
         try {
             ((ObjectNode)variants.get(1).path("properties")).set("curve",JSON.readTree("""
                 {"oneOf":[{"enum":["linear","stepped"]},{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"bezier"},"x1":{"type":"number","minimum":0,"maximum":1},"y1":{"type":"number"},"x2":{"type":"number","minimum":0,"maximum":1},"y2":{"type":"number"}},"required":["kind","x1","y1","x2","y2"]}]}
@@ -203,7 +204,7 @@ public final class EditorMcpTools implements AutoCloseable {
         data.put("revision", h.revision());
         data.put("version",io.github.samlinb.openbone.EditorApplication.version());
         data.put("mcpApiVersion",2);
-        data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",host.supportsViewControl(),"cleanPreview",host.supportsPreview(),"atomicEdits",true,"nonBoneKeyframeQuery",true,"nonBoneKeyframeEdits",true,"animationMedia",host.supportsPreview()));
+        data.put("capabilities",Map.of("sceneBuilding",true,"bezier",true,"projectIO",true,"playback",host.supportsViewControl(),"cleanPreview",host.supportsPreview(),"atomicEdits",true,"nonBoneKeyframeQuery",true,"nonBoneKeyframeEdits",true,"animationMedia",host.supportsPreview(),"eventKeyframeEdits",true));
         data.put("spineIO",Map.of("versions",io.github.samlinb.openbone.io.SpineVersion.exportVersions(),"formats",List.of("JSON","BINARY","NATIVE"),"nativeCliConfigured",io.github.samlinb.openbone.io.SpineCliBridge.configured()));
         data.put("dirty", h.isDirty());
         data.put("activeSkin", d.resources().activeSkin());
@@ -281,6 +282,10 @@ public final class EditorMcpTools implements AutoCloseable {
                     row.put("skinRequired", d.resources().activation().requiredConstraints().contains(c.id()));
                     row.put("skinActive", active.contains(c.id())); return row;
                 });
+            }
+            case "events" -> {
+                total = d.resources().events().size();
+                rows = d.resources().events().stream().map(JSON::valueToTree);
             }
             case "skins" -> {
                 total = d.skins().size();
@@ -394,9 +399,10 @@ public final class EditorMcpTools implements AutoCloseable {
                 for (JsonNode key : keys) {
                     if (!key.isTextual() || !ids.add(new EntityId(key.textValue()))) throw new IllegalArgumentException("keyIds must contain unique UUID strings.");
                 }
-                yield AnimationEdits.remove(d, id(e, "animationId"), ids);
+                yield EventMcpEdits.remove(d, id(e, "animationId"), ids);
             }
             case "put_constraint_keyframe", "put_deform_keyframe" -> AnimationMcpEdits.apply(d, e, op);
+            case "put_event_definition", "put_event_keyframe" -> EventMcpEdits.apply(d, e, op);
             default -> SceneMcpEdits.apply(d,e,op);
         };
     }

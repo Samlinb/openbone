@@ -64,6 +64,21 @@ class SpineMetadataTest {
         assertEquals(metadata, ExtendedEdits.addSkin(d, "extra").resources().metadata());
     }
 
+    @Test void newProject38ExportHasStableContentDerivedHashAfterPortableReopen() throws Exception {
+        var original=sample();
+        var data=original.withResources(new Resources(original.resources().skins(),"default",original.resources().events(),original.resources().atlas(),SpineMetadata.EMPTY,original.resources().activation()));
+        var attachment=data.attachments().get(0);var paths=Map.of(attachment.id(),"mesh");
+        var first=json.readTree(codec.encode(data,paths,"", "3.8.99"));
+        String hash=first.path("skeleton").path("hash").asText();
+        assertTrue(hash.matches("[0-9a-f]{64}"));
+        assertEquals(hash,json.readTree(codec.encode(data,paths,"", "3.8.99")).path("skeleton").path("hash").asText());
+        var doc=new ProjectDocument(data);Path saved=temp.resolve("fresh.json");doc.savePortable(saved);
+        var reopened=new ProjectDocument(DocumentSnapshot.EMPTY);reopened.openResolved(saved);
+        assertEquals(hash,json.readTree(codec.encode(reopened.history().state().model(),paths,"", "3.8.99")).path("skeleton").path("hash").asText());
+        var moved=MeshEdits.vertex(data,attachment.id(),0,new Vec2(-1,0),new Vec2(0,1));
+        assertNotEquals(hash,json.readTree(codec.encode(moved,paths,"", "3.8.99")).path("skeleton").path("hash").asText());
+    }
+
     @Test void malformedEdgesAreReportedWithoutDiscardingMesh() throws Exception {
         sample();
         for (String edges : List.of("[0,999]", "[0,1]", "[0]", "null", "[0,2.5]")) {

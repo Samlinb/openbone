@@ -51,8 +51,24 @@ final class ProjectScope {
 
     void load(ProjectDocument target, Path path, SpineImportPolicy.Approval approval) throws Exception {
         check(path);
-        if (approval != null || SpineProjectSource.isNative(path) || ProjectDocument.isSpineExport(path))
+        if (SpineProjectSource.isNative(path))
             throw new IOException(m("isolation.nativeOnly"));
+        // Spine imports are admitted only from a service-created immutable staging
+        // directory. Check every descendant before an importer resolves its atlas
+        // and texture references; the parser also confines its relative paths.
+        Path imports = root.resolve("imports");
+        boolean staged = path.startsWith(imports) && path.getNameCount() >= imports.getNameCount() + 2;
+        if (staged) {
+            Path batch = imports.resolve(imports.relativize(path).getName(0));
+            check(batch);
+            if (!Files.isDirectory(batch, LinkOption.NOFOLLOW_LINKS)) throw new IOException(m("isolation.path"));
+            try (var paths = Files.walk(batch)) { for (Path child : paths.toList()) check(child); }
+            target.openResolved(path, approval);
+            for (var attachment : target.history().state().model().attachments())
+                if (attachment.source() != null) check(Path.of(attachment.source()));
+            return;
+        }
+        if (approval != null || ProjectDocument.isSpineExport(path)) throw new IOException(m("isolation.nativeOnly"));
         // Decode native JSON only: import adapters may resolve atlas/native resources before publication.
         target.open(path, model -> {
             try {

@@ -60,26 +60,40 @@ public final class ExportPackage {
 
     private Path publish(Path directory, DocumentSnapshot d, Path imageBase, String version, boolean compatibleImages, Format format) throws IOException {
         RuntimeRange.validate(d);
+        boolean legacyAtlas = SpineVersion.target(version) == SpineVersion.V38;
         Map<EntityId, String> plannedPaths = new LinkedHashMap<>();
-        Map<EntityId, byte[]> plannedImages = new LinkedHashMap<>();
+        record SourceImage(byte[] bytes, int width, int height, String digest) {}
+        record PlannedImage(byte[] bytes, int width, int height, String digest) {}
+        Map<Path,SourceImage> sources = new HashMap<>();
+        Map<EntityId, PlannedImage> plannedImages = new LinkedHashMap<>();
         int plannedIndex = 0;
         for (var a : d.attachments())
             if (a.source() != null) {
                 plannedPaths.put(a.id(), "region_" + plannedIndex++);
                 Path source = ResourcePaths.resolve(imageBase, a.source());
-                byte[] bytes = compatibleImages ? RuntimePng.readCompatible(source) : RuntimePng.read(source);
-                var pixels = io.github.samlinb.openbone.viewport.ImageAssets.decodePng(bytes);
+                SourceImage image=sources.get(source);
+                if(image==null) {
+                    byte[] sourceBytes=compatibleImages ? RuntimePng.readCompatible(source) : RuntimePng.read(source);
+                    var decoded=io.github.samlinb.openbone.viewport.ImageAssets.decodePng(sourceBytes);
+                    image=new SourceImage(sourceBytes,decoded.getWidth(),decoded.getHeight(),ResourcePaths.sha(sourceBytes));
+                    sources.put(source,image);
+                }
+                byte[] bytes=image.bytes();int width=image.width(),height=image.height();String digest=image.digest();
                 var region = d.resources().atlas().get(a.id());
+                if (legacyAtlas && region != null && region.premultiplied())
+                    throw new IOException("Spine 3.8 atlas cannot declare premultiplied alpha; convert the texture to straight alpha before export.");
                 if (region != null
-                        && (pixels.getWidth() != region.pageWidth() || pixels.getHeight() != region.pageHeight()))
+                        && (width != region.pageWidth() || height != region.pageHeight()))
                     throw new IOException("Atlas page dimensions changed: " + a.name());
                 if(format==Format.NATIVE&&region!=null) {
                     if (region.premultiplied()) throw new IOException(io.github.samlinb.openbone.i18n.M.m("atlas.nativePmaConversion"));
                     var output=new ByteArrayOutputStream();
-                    javax.imageio.ImageIO.write(AtlasSplitter.unpack(pixels,region),"png",output);
+                    var pixels=AtlasSplitter.unpack(io.github.samlinb.openbone.viewport.ImageAssets.decodePng(bytes),region);
+                    javax.imageio.ImageIO.write(pixels,"png",output);
                     bytes=output.toByteArray();
+                    digest=ResourcePaths.sha(bytes);width=pixels.getWidth();height=pixels.getHeight();
                 }
-                plannedImages.put(a.id(), bytes);
+                plannedImages.put(a.id(), new PlannedImage(bytes,width,height,digest));
             }
         byte[] plannedSkeleton = new SkeletonJsonCodec().encode(d, plannedPaths, "images/", version);
         byte[] plannedBinary = format==Format.BINARY?SpineBinaryWriter.encode(d,plannedPaths,"images/",version):null;
@@ -95,44 +109,51 @@ public final class ExportPackage {
         Files.createDirectory(stage);
         checkpoint.at(Stage.AFTER_STAGE_CREATE, stage);
         Files.createDirectory(stage.resolve("images"));
-        Map<EntityId, String> paths = new LinkedHashMap<>();
         Map<String, String> hashes = new LinkedHashMap<>();
         StringBuilder atlas = new StringBuilder();
+        // Region names and skeleton ordering stay attachment-based. Only pages
+        // whose full bytes and all emitted page settings match can be shared.
+        record PageKey(String digest, int width, int height, boolean pma,
+                       String format, String filter, String wrap) {}
+        record Entry(String name, AtlasRegion region, int width, int height) {}
+        class Page {
+            final String relative; final byte[] png; final PageKey key; final List<Entry> entries = new ArrayList<>();
+            Page(String relative, byte[] png, PageKey key) { this.relative=relative; this.png=png; this.key=key; }
+        }
+        Map<PageKey,Page> pages = new LinkedHashMap<>();
         int index = 0;
         for (var attachment : d.attachments()) {
             if (attachment.source() == null)
                 continue;
             var r = attachment;
             String name = "region_" + index++;
-            paths.put(r.id(), name);
-            byte[] png = plannedImages.get(r.id());
-            var pixels = io.github.samlinb.openbone.viewport.ImageAssets.decodePng(png);
-            String relative = "images/" + name + ".png";
-            write(stage.resolve(relative), png);
-            hashes.put(relative, ResourcePaths.sha(png));
-            checkpoint.at(Stage.AFTER_IMAGE, stage);
-            // Copy an original page per attachment; preserve rotation/trim metadata and PNG
-            // bytes.
+            var planned=plannedImages.get(r.id());byte[] png=planned.bytes();
             var region = format==Format.NATIVE?null:d.resources().atlas().get(r.id());
-            if (region != null) {
-                atlas.append(relative).append('\n').append("size: ").append(region.pageWidth()).append(',')
-                        .append(region.pageHeight())
-                        .append("\nformat: RGBA8888\nfilter: Nearest,Nearest\nrepeat: none\npma: ").append(region.premultiplied()).append('\n').append(name)
-                        .append("\n  rotate: ").append(region.degrees()==0 ? "false" : region.degrees()==90 ? "true" : Integer.toString(region.degrees())).append("\n  xy: ")
-                        .append(region.x()).append(',').append(region.y()).append("\n  size: ").append(region.width())
+            var key = new PageKey(planned.digest(),planned.width(),planned.height(),region!=null&&region.premultiplied(),"RGBA8888","Nearest,Nearest","none");
+            Page page=pages.get(key);
+            if(page==null) { page=new Page("images/"+name+".png",png,key);pages.put(key,page); }
+            else if(!Arrays.equals(page.png,png)) throw new IOException("PNG digest collision; refusing to combine pages");
+            page.entries.add(new Entry(name,region,planned.width(),planned.height()));
+        }
+        for (Page page : pages.values()) {
+            write(stage.resolve(page.relative),page.png);hashes.put(page.relative,page.key.digest());
+            checkpoint.at(Stage.AFTER_IMAGE,stage);
+            atlas.append(page.relative).append('\n').append("size: ").append(page.key.width()).append(',').append(page.key.height())
+                    .append("\nformat: ").append(page.key.format()).append("\nfilter: ").append(page.key.filter())
+                    .append("\nrepeat: ").append(page.key.wrap()).append('\n');
+            if (!legacyAtlas) atlas.append("pma: ").append(page.key.pma()).append('\n');
+            for(Entry e:page.entries) {
+                var region=e.region();
+                atlas.append(e.name());
+                if(region!=null) atlas.append("\n  rotate: ").append(region.degrees()==0 ? "false" : region.degrees()==90 ? "true" : Integer.toString(region.degrees()))
+                        .append("\n  xy: ").append(region.x()).append(',').append(region.y()).append("\n  size: ").append(region.width())
                         .append(',').append(region.height()).append("\n  orig: ").append(region.originalWidth())
-                        .append(',').append(region.originalHeight()).append("\n  offset: ").append(region.offsetX())
-                        .append(',').append(region.offsetY()).append("\n  index: -1\n\n");
-                continue;
+                        .append(',').append(region.originalHeight()).append("\n  offset: ").append(region.offsetX()).append(',').append(region.offsetY());
+                else atlas.append("\n  rotate: false\n  xy: 0,0\n  size: ").append(e.width()).append(',').append(e.height())
+                        .append("\n  orig: ").append(e.width()).append(',').append(e.height()).append("\n  offset: 0,0");
+                atlas.append("\n  index: -1\n");
             }
-            atlas.append(relative).append('\n').append("size: ").append(pixels.getWidth()).append(',')
-                    .append(pixels.getHeight()).append('\n')
-                    .append("format: RGBA8888\nfilter: Nearest,Nearest\nrepeat: none\npma: false\n").append(name)
-                    .append('\n')
-                    .append("  rotate: false\n  xy: 0,0\n  size: ").append(pixels.getWidth()).append(',')
-                    .append(pixels.getHeight())
-                    .append("\n  orig: ").append(pixels.getWidth()).append(',').append(pixels.getHeight())
-                    .append("\n  offset: 0,0\n  index: -1\n\n");
+            atlas.append('\n');
         }
         byte[] skeleton = plannedSkeleton;
         write(stage.resolve("skeleton.json"), skeleton);

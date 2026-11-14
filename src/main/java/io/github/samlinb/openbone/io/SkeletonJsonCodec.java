@@ -39,6 +39,12 @@ public final class SkeletonJsonCodec {
         ObjectNode root = (ObjectNode)json.readTree(encode(d, regionPaths, images));
         if(target.legacy())Spine38Json.export(root, d);
         SpineVersionJson.export(root,target,version);
+        // The 3.8 C# runtime indexes skeleton.hash even when the source project
+        // was created locally and has no imported metadata. Preserve an existing
+        // source hash; otherwise derive a stable value from the target JSON before
+        // inserting the field (and therefore without a self-referential hash).
+        if(target.legacy() && !root.path("skeleton").has("hash"))
+            ((ObjectNode)root.get("skeleton")).put("hash", ResourcePaths.sha(json.writeValueAsBytes(root)));
         byte[] bytes = json.writerWithDefaultPrettyPrinter().writeValueAsBytes(root);
         if (bytes.length > ProjectCodec.MAX_BYTES) throw new ProjectFormatException("Export exceeds 16 MiB");
         return bytes;

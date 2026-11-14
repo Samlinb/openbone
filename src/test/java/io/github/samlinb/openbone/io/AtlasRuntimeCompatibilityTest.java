@@ -59,6 +59,17 @@ class AtlasRuntimeCompatibilityTest {
         assertTrue(loaded.resources().atlas().values().iterator().next().premultiplied());
         assertArrayEquals(original,Files.readAllBytes(Path.of(loaded.attachments().get(0).source())));
         assertArrayEquals(original,Files.readAllBytes(temp.resolve("page.png")));
+        assertThrows(java.io.IOException.class,()->new ExportPackage().publish(temp.resolve("legacy-pma"),model,temp,"3.8.99",ExportPackage.Format.JSON));
+        assertFalse(Files.exists(temp.resolve("legacy-pma/current.json")));
+    }
+
+    @Test void spine38AtlasUsesLegacyPageHeader() throws Exception {
+        var model=new SkeletonJsonCodec().read(source(false,"1",4,4));
+        Path exported=new ExportPackage().publish(temp.resolve("legacy"),model,temp,"3.8.99",ExportPackage.Format.JSON);
+        String atlas=Files.readString(exported.resolveSibling("skeleton.atlas"));
+        assertFalse(atlas.contains("pma:"));
+        assertTrue(atlas.contains("repeat: none\nregion_0\n  rotate:"));
+        assertEquals(1,new SkeletonJsonCodec().read(exported).attachments().size());
     }
 
     @Test void platformPageResizeRetainsDeclaredUvSpaceAndReportsPlaceholderArtwork() throws Exception {

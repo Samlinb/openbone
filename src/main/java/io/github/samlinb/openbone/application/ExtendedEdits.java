@@ -133,8 +133,10 @@ public final class ExtendedEdits {
         return AnimationEdits.clip(d, clip, a -> {
             var old = a.discrete();
             var keys = new ArrayList<>(old.events());
-            keys.removeIf(k -> k.id().equals(e.id()));
-            keys.add(e);
+            // Preserve equal-time event order when editing an existing key.
+            int index = -1;
+            for (int i = 0; i < keys.size(); i++) if (keys.get(i).id().equals(e.id())) { index = i; break; }
+            if (index < 0) keys.add(e); else keys.set(index, e);
             return discrete(a, new DiscreteTracks(old.attachments(), old.drawOrder(), keys,old.colors()));
         });
     }
