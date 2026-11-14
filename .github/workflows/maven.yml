@@ -61,10 +61,10 @@ jobs:
         # Same Maven version cannot be published twice to GitHub Packages.
         # Retrying an interrupted release must not fail on the already-published artifact.
         version="${GITHUB_REF_NAME#v}"
-        if gh api --paginate "/repos/${{ github.repository }}/packages/maven/io.github.samlinb.openbone.openbone/versions" \
-             --jq '.[].name' 2>/dev/null | grep -Fxq "$version"; then
-          echo "published=true" >> "$GITHUB_OUTPUT"
-        fi
+        artifact="https://maven.pkg.github.com/${{ github.repository }}/io/github/samlinb/openbone/openbone/$version/openbone-$version.pom"
+        status=$(curl -s -o /dev/null -w '%{http_code}' -u "${GITHUB_ACTOR}:${GITHUB_TOKEN}" "$artifact")
+        echo "Packages lookup for $version returned HTTP $status"
+        if [ "$status" = "200" ]; then echo "published=true" >> "$GITHUB_OUTPUT"; fi
 
     - name: Build and Publish with Maven
       if: github.event_name == 'push'
