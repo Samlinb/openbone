@@ -24,8 +24,8 @@ class ProjectIsolationTest {
     final HttpClient client = HttpClient.newHttpClient();
 
     @BeforeEach void start() throws Exception {
-        alice = Files.createDirectory(temp.resolve("alice"));
-        bob = Files.createDirectory(temp.resolve("bob"));
+        alice = Files.createDirectory(temp.resolve("alice")).toRealPath();
+        bob = Files.createDirectory(temp.resolve("bob")).toRealPath();
         var model = new DocumentSnapshot(List.of(new Bone(bone,"root",null,Transform.IDENTITY,60)), List.of(), List.of(),
                 List.of(new AnimationClip(animation,"idle",List.of())));
         for (Path root : List.of(alice,bob)) Files.write(root.resolve("project.json"), new ProjectCodec().encode(model));

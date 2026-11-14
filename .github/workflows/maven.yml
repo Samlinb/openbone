@@ -52,9 +52,29 @@ jobs:
       if: github.event_name != 'push'
       run: xvfb-run -a mvn -B verify --file pom.xml
 
+    - name: Check published package version
+      id: package
+      if: github.event_name == 'push'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Same Maven version cannot be published twice to GitHub Packages.
+        # Retrying an interrupted release must not fail on the already-published artifact.
+        version="${GITHUB_REF_NAME#v}"
+        if gh api --paginate "/repos/${{ github.repository }}/packages/maven/io.github.samlinb.openbone.openbone/versions" \
+             --jq '.[].name' 2>/dev/null | grep -Fxq "$version"; then
+          echo "published=true" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Build and Publish with Maven
       if: github.event_name == 'push'
-      run: xvfb-run -a mvn -B deploy -s $GITHUB_WORKSPACE/settings.xml --file pom.xml
+      run: |
+        if [ "${{ steps.package.outputs.published }}" = "true" ]; then
+          echo "Version ${GITHUB_REF_NAME#v} is already in GitHub Packages; verifying without redeploy."
+          xvfb-run -a mvn -B verify --file pom.xml
+        else
+          xvfb-run -a mvn -B deploy -s $GITHUB_WORKSPACE/settings.xml --file pom.xml
+        fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
