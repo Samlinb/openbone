@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      # 该 job 不检出代码，gh 无法从 git remote 推断仓库。
+      GH_REPO: ${{ github.repository }}
     steps:
     - name: Create draft release for tag
       if: github.event_name == 'push'
@@ -105,6 +108,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      # 该 job 不检出代码，gh 无法从 git remote 推断仓库。
+      GH_REPO: ${{ github.repository }}
     steps:
     - name: Publish draft release
       env:
