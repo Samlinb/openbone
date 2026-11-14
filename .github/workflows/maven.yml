@@ -64,7 +64,8 @@ jobs:
         artifact="https://maven.pkg.github.com/${{ github.repository }}/io/github/samlinb/openbone/openbone/$version/openbone-$version.pom"
         status=$(curl -s -o /dev/null -w '%{http_code}' -u "${GITHUB_ACTOR}:${GITHUB_TOKEN}" "$artifact")
         echo "Packages lookup for $version returned HTTP $status"
-        if [ "$status" = "200" ]; then echo "published=true" >> "$GITHUB_OUTPUT"; fi
+        # GitHub redirects an existing artifact to blob storage, so 302 also means published.
+        if [ "$status" = "200" ] || [ "$status" = "302" ]; then echo "published=true" >> "$GITHUB_OUTPUT"; fi
 
     - name: Build and Publish with Maven
       if: github.event_name == 'push'
