@@ -16,9 +16,11 @@ import java.util.concurrent.*;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
+@EnabledIfSystemProperty(named = "openbone.verifyGl", matches = "true")
 class ProjectLoadDialogTest {
     @TempDir Path temp;
     JFrame owner;

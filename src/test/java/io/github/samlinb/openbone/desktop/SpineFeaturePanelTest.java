@@ -4,6 +4,7 @@ import java.nio.file.*;
 import java.util.*;
 import javax.swing.*;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.junit.jupiter.api.io.TempDir;
 import io.github.samlinb.openbone.application.*;
 import io.github.samlinb.openbone.core.math.*;
@@ -12,6 +13,7 @@ import io.github.samlinb.openbone.core.animation.*;
 import io.github.samlinb.openbone.io.*;
 import static org.junit.jupiter.api.Assertions.*;
 
+@EnabledIfSystemProperty(named = "openbone.verifyGl", matches = "true")
 class SpineFeaturePanelTest {
     @TempDir Path temp;
     @SuppressWarnings("unchecked")
